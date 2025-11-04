@@ -23,6 +23,7 @@ export default function DashboardPage() {
   const [vehicleTypeNames, setVehicleTypeNames] = useState<Map<string, string>>(new Map())
   const [managerNames, setManagerNames] = useState<Map<string, string>>(new Map())
   const [departmentNames, setDepartmentNames] = useState<Map<string, string>>(new Map())
+  const [departmentColors, setDepartmentColors] = useState<Map<string, string>>(new Map())
   const router = useRouter()
   const supabase = createClient()
   const [adminMetrics, setAdminMetrics] = useState<{
@@ -88,10 +89,12 @@ export default function DashboardPage() {
       // Fetch all departments
       const { data: departments } = await supabase
         .from('departments')
-        .select('id, name')
+        .select('id, name, color')
       if (departments) {
         const deptsMap = new Map(departments.map(dept => [dept.id, dept.name]))
+        const colorsMap = new Map(departments.map(dept => [dept.id, dept.color || '#3b82f6']))
         setDepartmentNames(deptsMap)
+        setDepartmentColors(colorsMap)
       }
     } catch (error) {
       console.error('Error loading related data:', error)
@@ -1177,8 +1180,20 @@ export default function DashboardPage() {
                                             <strong>{product.product || 'Product'}</strong>
                                             {product.brand && ` - ${product.brand}`}
                                             {product.department && (
-                                              <span style={{ color: '#6b7280', marginLeft: '0.5rem' }}>
-                                                ({departmentNames.get(product.department) || product.department})
+                                              <span style={{ marginLeft: '0.5rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                                                <span
+                                                  style={{
+                                                    display: 'inline-block',
+                                                    width: '8px',
+                                                    height: '8px',
+                                                    borderRadius: '50%',
+                                                    backgroundColor: departmentColors.get(product.department) || '#3b82f6',
+                                                    flexShrink: 0
+                                                  }}
+                                                />
+                                                <span style={{ color: '#6b7280', fontSize: '0.8125rem' }}>
+                                                  ({departmentNames.get(product.department) || product.department})
+                                                </span>
                                               </span>
                                             )}
                                           </span>
@@ -1694,8 +1709,20 @@ export default function DashboardPage() {
                                 <strong>{p.product || 'Product'}</strong>
                                 {p.brand && ` - ${p.brand}`}
                                 {p.department && (
-                                  <span style={{ color: '#6b7280', marginLeft: '0.5rem' }}>
-                                    ({departmentNames.get(p.department) || p.department})
+                                  <span style={{ marginLeft: '0.5rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                                    <span
+                                      style={{
+                                        display: 'inline-block',
+                                        width: '8px',
+                                        height: '8px',
+                                        borderRadius: '50%',
+                                        backgroundColor: departmentColors.get(p.department) || '#3b82f6',
+                                        flexShrink: 0
+                                      }}
+                                    />
+                                    <span style={{ color: '#6b7280', fontSize: '0.8125rem' }}>
+                                      ({departmentNames.get(p.department) || p.department})
+                                    </span>
                                   </span>
                                 )}
                                 <span style={{ float: 'right', fontWeight: 600 }}>

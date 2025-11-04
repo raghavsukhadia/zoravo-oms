@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Search, Car, Wrench, DollarSign, FileText, Plus, Filter, Eye, Edit, Trash2, Calendar, Phone, Mail, CheckCircle, Percent } from 'lucide-react'
+import { Search, Car, Wrench, DollarSign, FileText, Plus, Filter, Eye, Edit, Trash2, Calendar, Phone, Mail, CheckCircle, Percent, Printer } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import VehicleDetailsModal from './components/VehicleDetailsModal'
+import JobSheetPrint from '@/components/JobSheetPrint'
 import { notificationWorkflow } from '@/lib/notification-workflow'
 import { checkUserRole, type UserRole } from '@/lib/rbac'
 
@@ -15,6 +16,8 @@ export default function VehiclesPage() {
   const [isUpdating, setIsUpdating] = useState(false)
   const [selectedVehicleDetails, setSelectedVehicleDetails] = useState<any>(null)
   const [showDetailsModal, setShowDetailsModal] = useState(false)
+  const [selectedVehicleForPrint, setSelectedVehicleForPrint] = useState<any>(null)
+  const [showPrintModal, setShowPrintModal] = useState(false)
   const [userRole, setUserRole] = useState<UserRole | null>(null)
   const router = useRouter()
   const supabase = createClient()
@@ -280,6 +283,15 @@ export default function VehiclesPage() {
           }}
           onUpdate={() => {
             fetchVehicles() // Refresh the list after any updates
+          }}
+        />
+      )}
+      {showPrintModal && selectedVehicleForPrint && (
+        <JobSheetPrint
+          vehicle={selectedVehicleForPrint}
+          onClose={() => {
+            setShowPrintModal(false)
+            setSelectedVehicleForPrint(null)
           }}
         />
       )}
@@ -786,6 +798,24 @@ export default function VehiclesPage() {
                             title="View Details"
                           >
                             <Eye style={{ width: '0.75rem', height: '0.75rem' }} />
+                          </button>
+                          <button 
+                            onClick={() => {
+                              setSelectedVehicleForPrint(vehicle.fullData)
+                              setShowPrintModal(true)
+                            }}
+                            style={{
+                              padding: '0.5rem',
+                              backgroundColor: '#7c3aed',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '0.375rem',
+                              fontSize: '0.75rem',
+                              cursor: 'pointer'
+                            }}
+                            title="Print Job Sheet"
+                          >
+                            <Printer style={{ width: '0.75rem', height: '0.75rem' }} />
                           </button>
                           <button 
                             onClick={() => {

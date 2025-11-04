@@ -243,17 +243,17 @@ export default function VehicleDetailsModal({ vehicle, onClose, onUpdate }: Vehi
 
   return (
     <div style={{
-      position: 'fixed',
-      inset: 0,
-      backgroundColor: 'rgba(0, 0, 0, 0.5)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-      padding: '2rem'
-    }}
-    onClick={onClose}
-    >
+        position: 'fixed',
+        inset: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+        padding: '2rem'
+      }}
+      onClick={onClose}
+      >
       <div style={{
         backgroundColor: 'white',
         borderRadius: '0.5rem',
@@ -267,37 +267,39 @@ export default function VehicleDetailsModal({ vehicle, onClose, onUpdate }: Vehi
       onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div style={{
-          padding: '1.5rem',
-          borderBottom: '1px solid #e2e8f0',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center'
-        }}>
-          <div>
-            <h2 style={{ fontSize: '1.5rem', fontWeight: '600', color: '#1e293b', margin: 0 }}>
-              Vehicle Inward Details
-            </h2>
-            <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0.25rem 0 0 0' }}>
-              ID: {vehicle.short_id || vehicle.id?.substring(0, 8) + '...'}
-            </p>
+          <div style={{
+            padding: '1.5rem',
+            borderBottom: '1px solid #e2e8f0',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center'
+          }}>
+            <div>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: '600', color: '#1e293b', margin: 0 }}>
+                Vehicle Inward Details
+              </h2>
+              <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0.25rem 0 0 0' }}>
+                ID: {vehicle.short_id || vehicle.id?.substring(0, 8) + '...'}
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <button
+                onClick={onClose}
+                style={{
+                  padding: '0.5rem',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  borderRadius: '0.375rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <X style={{ width: '1.5rem', height: '1.5rem', color: '#64748b' }} />
+              </button>
+            </div>
           </div>
-          <button
-            onClick={onClose}
-            style={{
-              padding: '0.5rem',
-              backgroundColor: 'transparent',
-              border: 'none',
-              borderRadius: '0.375rem',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
-          >
-            <X style={{ width: '1.5rem', height: '1.5rem', color: '#64748b' }} />
-          </button>
-        </div>
 
         {/* Content */}
         <div style={{

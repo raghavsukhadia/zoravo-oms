@@ -23,7 +23,7 @@ export default function SettingsPage() {
   const [editingVehicleType, setEditingVehicleType] = useState<any>(null)
   const [editingDepartment, setEditingDepartment] = useState<any>(null)
   const [vehicleTypeForm, setVehicleTypeForm] = useState({ name: '', status: 'active' })
-  const [departmentForm, setDepartmentForm] = useState({ name: '', status: 'active' })
+  const [departmentForm, setDepartmentForm] = useState({ name: '', status: 'active', color: '#3b82f6' })
   
   // Forms for locations
   const [showLocationForm, setShowLocationForm] = useState(false)
@@ -840,7 +840,7 @@ export default function SettingsPage() {
         // Update existing
         const { error } = await supabase
           .from('departments')
-          .update({ name: departmentForm.name, status: departmentForm.status })
+          .update({ name: departmentForm.name, status: departmentForm.status, color: departmentForm.color })
           .eq('id', editingDepartment.id)
         
         if (error) throw error
@@ -849,7 +849,7 @@ export default function SettingsPage() {
         // Create new
         const { error } = await supabase
           .from('departments')
-          .insert([{ name: departmentForm.name, status: departmentForm.status }])
+          .insert([{ name: departmentForm.name, status: departmentForm.status, color: departmentForm.color }])
         
         if (error) throw error
         alert('Department created successfully!')
@@ -858,7 +858,7 @@ export default function SettingsPage() {
       await fetchDepartments()
       setShowDepartmentForm(false)
       setEditingDepartment(null)
-      setDepartmentForm({ name: '', status: 'active' })
+      setDepartmentForm({ name: '', status: 'active', color: '#3b82f6' })
     } catch (error: any) {
       alert(`Failed to save: ${error.message}`)
     }
@@ -1954,7 +1954,7 @@ export default function SettingsPage() {
                 <button
                   onClick={() => {
                     setEditingDepartment(null)
-                    setDepartmentForm({ name: '', status: 'active' })
+                    setDepartmentForm({ name: '', status: 'active', color: '#3b82f6' })
                     setShowDepartmentForm(true)
                   }}
                   style={{
@@ -2022,12 +2022,65 @@ export default function SettingsPage() {
                       </select>
                     </div>
                   </div>
+                  <div style={{ marginBottom: '1rem' }}>
+                    <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '500', color: '#374151', marginBottom: '0.5rem' }}>
+                      Department Color *
+                    </label>
+                    <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                      <input
+                        type="color"
+                        value={departmentForm.color}
+                        onChange={(e) => setDepartmentForm({ ...departmentForm, color: e.target.value })}
+                        style={{
+                          width: '60px',
+                          height: '40px',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '0.375rem',
+                          cursor: 'pointer'
+                        }}
+                      />
+                      <input
+                        type="text"
+                        value={departmentForm.color}
+                        onChange={(e) => setDepartmentForm({ ...departmentForm, color: e.target.value })}
+                        placeholder="#3b82f6"
+                        style={{
+                          flex: 1,
+                          padding: '0.75rem',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '0.375rem',
+                          fontSize: '0.875rem',
+                          outline: 'none',
+                          fontFamily: 'monospace'
+                        }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                      {['#3b82f6', '#059669', '#dc2626', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'].map((color) => (
+                        <button
+                          key={color}
+                          type="button"
+                          onClick={() => setDepartmentForm({ ...departmentForm, color })}
+                          style={{
+                            width: '32px',
+                            height: '32px',
+                            backgroundColor: color,
+                            border: departmentForm.color === color ? '2px solid #1e293b' : '2px solid #e2e8f0',
+                            borderRadius: '0.375rem',
+                            cursor: 'pointer',
+                            boxShadow: departmentForm.color === color ? '0 0 0 2px rgba(59, 130, 246, 0.2)' : 'none'
+                          }}
+                          title={color}
+                        />
+                      ))}
+                    </div>
+                  </div>
                   <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
                     <button
                       onClick={() => {
                         setShowDepartmentForm(false)
                         setEditingDepartment(null)
-                        setDepartmentForm({ name: '', status: 'active' })
+                        setDepartmentForm({ name: '', status: 'active', color: '#3b82f6' })
                       }}
                       style={{
                         padding: '0.5rem 1rem',
@@ -2064,6 +2117,7 @@ export default function SettingsPage() {
                   <thead>
                     <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
                       <th style={{ padding: '1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#475569' }}>Name</th>
+                      <th style={{ padding: '1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#475569' }}>Color</th>
                       <th style={{ padding: '1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#475569' }}>Status</th>
                       <th style={{ padding: '1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#475569' }}>Created</th>
                       <th style={{ padding: '1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#475569' }}>Actions</th>
@@ -2072,7 +2126,7 @@ export default function SettingsPage() {
                   <tbody>
                     {departments.length === 0 ? (
                       <tr>
-                        <td colSpan={4} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>
+                        <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>
                           No departments found. Click "Add Department" to create one.
                         </td>
                       </tr>
@@ -2081,6 +2135,24 @@ export default function SettingsPage() {
                         <tr key={department.id} style={{ borderBottom: index === departments.length - 1 ? 'none' : '1px solid #f1f5f9' }}>
                           <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#1e293b', fontWeight: '500' }}>
                             {department.name || '-'}
+                          </td>
+                          <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <div
+                                style={{
+                                  width: '32px',
+                                  height: '32px',
+                                  backgroundColor: department.color || '#3b82f6',
+                                  borderRadius: '0.375rem',
+                                  border: '1px solid #e2e8f0',
+                                  boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                }}
+                                title={department.color || '#3b82f6'}
+                              />
+                              <span style={{ fontSize: '0.75rem', color: '#64748b', fontFamily: 'monospace' }}>
+                                {department.color || '#3b82f6'}
+                              </span>
+                            </div>
                           </td>
                           <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
                             <span style={{
@@ -2102,10 +2174,7 @@ export default function SettingsPage() {
                               <button
                                 onClick={() => {
                                   setEditingDepartment(department)
-                                  setDepartmentForm({
-                                    name: department.name || '',
-                                    status: department.status || 'active'
-                                  })
+                                  setDepartmentForm({ name: department.name || '', status: department.status || 'active', color: department.color || '#3b82f6' })
                                   setShowDepartmentForm(true)
                                 }}
                                 style={{

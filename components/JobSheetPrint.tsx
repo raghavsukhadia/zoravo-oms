@@ -1,0 +1,829 @@
+'use client'
+
+import React, { useEffect, useRef, useState } from 'react'
+import { Printer, X } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
+
+interface VehicleInward {
+  id: string
+  short_id?: string
+  customer_name?: string
+  customer_phone?: string
+  customer_email?: string
+  customer_address?: string
+  customer_city?: string
+  customer_state?: string
+  customer_pincode?: string
+  registration_number?: string
+  make?: string
+  model?: string
+  color?: string
+  year?: number
+  vehicle_type?: string
+  engine_number?: string
+  chassis_number?: string
+  odometer_reading?: number
+  issues_reported?: string
+  accessories_requested?: string
+  priority?: string
+  assigned_installer_id?: string
+  assigned_manager_id?: string
+  location_id?: string
+  estimated_completion_date?: string
+  notes?: string
+  status?: string
+  created_at?: string
+}
+
+interface JobSheetPrintProps {
+  vehicle: VehicleInward
+  onClose: () => void
+}
+
+export default function JobSheetPrint({ vehicle, onClose }: JobSheetPrintProps) {
+  const printRef = useRef<HTMLDivElement>(null)
+  const supabase = createClient()
+  
+  const [managerName, setManagerName] = useState<string>('')
+  const [locationName, setLocationName] = useState<string>('')
+  const [vehicleTypeName, setVehicleTypeName] = useState<string>('')
+  const [installerName, setInstallerName] = useState<string>('')
+  const [products, setProducts] = useState<any[]>([])
+  const [departmentNames, setDepartmentNames] = useState<Map<string, string>>(new Map())
+  const [companyName, setCompanyName] = useState<string>('RS CAR ACCESSORIES')
+  const [companyLocation, setCompanyLocation] = useState<string>('Nagpur')
+
+  useEffect(() => {
+    fetchRelatedData()
+    parseProducts()
+    fetchDepartments()
+    fetchCompanySettings()
+  }, [vehicle])
+
+  const fetchRelatedData = async () => {
+    try {
+      // Fetch Manager Name
+      if (vehicle.assigned_manager_id) {
+        const { data: managerData } = await supabase
+          .from('profiles')
+          .select('name')
+          .eq('id', vehicle.assigned_manager_id)
+          .single()
+        setManagerName(managerData?.name || 'Not Assigned')
+      } else {
+        setManagerName('Not Assigned')
+      }
+
+      // Fetch Location Name
+      if (vehicle.location_id) {
+        const { data: locationData } = await supabase
+          .from('locations')
+          .select('name')
+          .eq('id', vehicle.location_id)
+          .single()
+        setLocationName(locationData?.name || 'Not Specified')
+      } else {
+        setLocationName('Not Specified')
+      }
+
+      // Fetch Vehicle Type Name
+      if (vehicle.vehicle_type) {
+        const { data: vehicleTypeData } = await supabase
+          .from('vehicle_types')
+          .select('name')
+          .eq('id', vehicle.vehicle_type)
+          .single()
+        setVehicleTypeName(vehicleTypeData?.name || vehicle.vehicle_type || 'Not Specified')
+      } else {
+        setVehicleTypeName('Not Specified')
+      }
+
+      // Fetch Installer Name
+      if (vehicle.assigned_installer_id) {
+        const { data: installerData } = await supabase
+          .from('profiles')
+          .select('name')
+          .eq('id', vehicle.assigned_installer_id)
+          .single()
+        setInstallerName(installerData?.name || 'Not Assigned')
+      } else {
+        setInstallerName('Not Assigned')
+      }
+    } catch (error) {
+      console.error('Error fetching related data:', error)
+    }
+  }
+
+  const fetchDepartments = async () => {
+    try {
+      const { data: departments } = await supabase
+        .from('departments')
+        .select('id, name')
+      if (departments) {
+        const deptsMap = new Map(departments.map((dept: any) => [dept.id, dept.name]))
+        setDepartmentNames(deptsMap)
+      }
+    } catch (error) {
+      console.error('Error loading departments:', error)
+    }
+  }
+
+  const fetchCompanySettings = async () => {
+    try {
+      const { data } = await supabase
+        .from('system_settings')
+        .select('setting_key, setting_value')
+        .in('setting_key', ['company_name', 'company_address'])
+        .eq('setting_group', 'company')
+      
+      if (data) {
+        const nameSetting = data.find(s => s.setting_key === 'company_name')
+        const addressSetting = data.find(s => s.setting_key === 'company_address')
+        
+        if (nameSetting?.setting_value) {
+          setCompanyName(nameSetting.setting_value.toUpperCase())
+        }
+        
+        // Extract location from address if available
+        if (addressSetting?.setting_value) {
+          const address = addressSetting.setting_value
+          const parts = address.split(',')
+          if (parts.length >= 2) {
+            const city = parts[parts.length - 2].trim()
+            if (city) {
+              setCompanyLocation(city)
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading company settings:', error)
+    }
+  }
+
+  const parseProducts = async () => {
+    if (vehicle.accessories_requested) {
+      try {
+        const parsed = JSON.parse(vehicle.accessories_requested)
+        if (Array.isArray(parsed)) {
+          const productsWithDeptNames = await Promise.all(parsed.map(async (product: any) => {
+            if (product.department && typeof product.department === 'string' && product.department.includes('-')) {
+              try {
+                const { data: deptData } = await supabase
+                  .from('departments')
+                  .select('name')
+                  .eq('id', product.department)
+                  .single()
+                
+                return {
+                  ...product,
+                  department: deptData?.name || product.department
+                }
+              } catch {
+                return product
+              }
+            }
+            return product
+          }))
+          setProducts(productsWithDeptNames.filter((p: any) => p.product && p.product.trim()))
+        } else {
+          setProducts([])
+        }
+      } catch {
+        setProducts([])
+      }
+    } else {
+      setProducts([])
+    }
+  }
+
+  const handlePrint = () => {
+    if (printRef.current) {
+      const printWindow = window.open('', '_blank')
+      if (printWindow) {
+        printWindow.document.write(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Job Sheet - ${vehicle.registration_number || vehicle.short_id || vehicle.id}</title>
+              <style>
+                @page {
+                  size: A4;
+                  margin: 10mm;
+                }
+                * {
+                  margin: 0;
+                  padding: 0;
+                  box-sizing: border-box;
+                }
+                body {
+                  font-family: 'Arial', sans-serif;
+                  font-size: 9pt;
+                  line-height: 1.3;
+                  color: #000;
+                  background: white;
+                }
+                .header {
+                  border-bottom: 2px solid #2563eb;
+                  padding-bottom: 8px;
+                  margin-bottom: 10px;
+                }
+                .header-top {
+                  display: flex;
+                  align-items: center;
+                  justify-content: space-between;
+                  margin-bottom: 12px;
+                  padding-bottom: 10px;
+                  border-bottom: 1px solid #e2e8f0;
+                }
+                .logo-section {
+                  display: flex;
+                  align-items: center;
+                  gap: 10px;
+                  flex-shrink: 0;
+                }
+                .logo-svg {
+                  width: 45px;
+                  height: 38px;
+                  flex-shrink: 0;
+                }
+                .logo-text {
+                  display: flex;
+                  flex-direction: column;
+                  gap: 2px;
+                }
+                .logo-text-main {
+                  font-size: 12pt;
+                  font-weight: 600;
+                  color: #1e293b;
+                  letter-spacing: 0.05em;
+                  text-transform: uppercase;
+                }
+                .logo-text-sub {
+                  font-size: 8pt;
+                  font-weight: 500;
+                  color: #64748b;
+                  letter-spacing: 0.05em;
+                  text-transform: uppercase;
+                }
+                .company-header-section {
+                  display: flex;
+                  flex-direction: column;
+                  align-items: center;
+                  flex: 1;
+                  padding: 0 15px;
+                }
+                .company-name-main {
+                  font-size: 20pt;
+                  font-weight: 700;
+                  color: #1e293b;
+                  margin-bottom: 4px;
+                  letter-spacing: 1px;
+                  text-transform: uppercase;
+                }
+                .company-location-main {
+                  font-size: 10pt;
+                  color: #64748b;
+                  font-weight: 500;
+                }
+                .header-bottom {
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                  margin-top: 8px;
+                }
+                .header h1 {
+                  color: #2563eb;
+                  font-size: 18pt;
+                  margin-bottom: 2px;
+                  font-weight: bold;
+                }
+                .header .subtitle {
+                  color: #64748b;
+                  font-size: 8pt;
+                }
+                .section {
+                  margin-bottom: 10px;
+                  page-break-inside: avoid;
+                }
+                .section-title {
+                  background: #f1f5f9;
+                  padding: 4px 8px;
+                  font-weight: bold;
+                  font-size: 10pt;
+                  color: #1e293b;
+                  border-left: 3px solid #2563eb;
+                  margin-bottom: 6px;
+                }
+                .info-grid {
+                  display: grid;
+                  grid-template-columns: 1fr 1fr;
+                  gap: 8px;
+                  margin-bottom: 8px;
+                }
+                .info-item {
+                  margin-bottom: 4px;
+                }
+                .info-label {
+                  font-weight: bold;
+                  color: #475569;
+                  font-size: 8pt;
+                  margin-bottom: 2px;
+                }
+                .info-value {
+                  color: #0f172a;
+                  font-size: 9pt;
+                  padding: 2px 0;
+                  border-bottom: 1px dotted #cbd5e1;
+                }
+                .full-width {
+                  grid-column: 1 / -1;
+                }
+                .products-table {
+                  width: 100%;
+                  border-collapse: collapse;
+                  margin-top: 6px;
+                  font-size: 8pt;
+                }
+                .products-table th {
+                  background: #f1f5f9;
+                  padding: 4px 6px;
+                  text-align: left;
+                  font-weight: bold;
+                  border: 1px solid #cbd5e1;
+                  font-size: 8pt;
+                }
+                .products-table td {
+                  padding: 3px 6px;
+                  border: 1px solid #cbd5e1;
+                  font-size: 8pt;
+                  vertical-align: middle;
+                }
+                .status-checkbox {
+                  width: 12px;
+                  height: 12px;
+                  border: 1.5px solid #2563eb;
+                  display: inline-block;
+                  margin-right: 4px;
+                  vertical-align: middle;
+                }
+                .status-cell {
+                  display: flex;
+                  align-items: center;
+                  gap: 4px;
+                }
+                .status-text {
+                  font-size: 7pt;
+                  color: #64748b;
+                }
+                .footer {
+                  margin-top: 12px;
+                  padding-top: 8px;
+                  border-top: 1px solid #e2e8f0;
+                  font-size: 7pt;
+                  color: #64748b;
+                  text-align: center;
+                }
+                .signature-section {
+                  margin-top: 15px;
+                  display: grid;
+                  grid-template-columns: 1fr 1fr;
+                  gap: 30px;
+                }
+                .signature-box {
+                  border-top: 2px solid #000;
+                  padding-top: 6px;
+                  text-align: center;
+                  font-size: 9pt;
+                }
+                .signature-label {
+                  font-weight: bold;
+                  margin-top: 3px;
+                }
+                .notes-box {
+                  background: #f8fafc;
+                  padding: 6px;
+                  border-radius: 3px;
+                  font-size: 8pt;
+                  border: 1px solid #e2e8f0;
+                  margin-top: 4px;
+                }
+                @media print {
+                  body {
+                    print-color-adjust: exact;
+                    -webkit-print-color-adjust: exact;
+                  }
+                  .no-print {
+                    display: none !important;
+                  }
+                }
+              </style>
+            </head>
+            <body>
+              ${printRef.current.innerHTML}
+            </body>
+          </html>
+        `)
+        printWindow.document.close()
+        printWindow.focus()
+        setTimeout(() => {
+          printWindow.print()
+          printWindow.close()
+        }, 250)
+      }
+    }
+  }
+
+  const formatDate = (dateString?: string) => {
+    if (!dateString) return 'N/A'
+    try {
+      const date = new Date(dateString)
+      return date.toLocaleDateString('en-IN', { 
+        day: '2-digit', 
+        month: 'short', 
+        year: 'numeric' 
+      })
+    } catch {
+      return dateString
+    }
+  }
+
+  const formatDateTime = (dateString?: string) => {
+    if (!dateString) return 'N/A'
+    try {
+      const date = new Date(dateString)
+      return date.toLocaleString('en-IN', { 
+        day: '2-digit', 
+        month: 'short', 
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    } catch {
+      return dateString
+    }
+  }
+
+  // Format notes - handle JSON format and convert to readable text
+  const formatNotes = (notes?: string): string => {
+    if (!notes) return ''
+    
+    try {
+      // Try to parse as JSON
+      const parsed = JSON.parse(notes)
+      
+      if (typeof parsed === 'object' && parsed !== null) {
+        // Format JSON object into readable text
+        const formatObject = (obj: any, indent = 0): string => {
+          let result = ''
+          for (const [key, value] of Object.entries(obj)) {
+            const formattedKey = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+            if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+              result += `${'  '.repeat(indent)}${formattedKey}:\n`
+              result += formatObject(value, indent + 1)
+            } else if (Array.isArray(value)) {
+              result += `${'  '.repeat(indent)}${formattedKey}: ${value.join(', ')}\n`
+            } else {
+              const displayValue = value === '' ? '(Empty)' : value
+              result += `${'  '.repeat(indent)}${formattedKey}: ${displayValue}\n`
+            }
+          }
+          return result
+        }
+        return formatObject(parsed).trim()
+      }
+    } catch {
+      // If not valid JSON, return as-is
+    }
+    
+    return notes
+  }
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000,
+      padding: '20px'
+    }}>
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: '0.5rem',
+        width: '100%',
+        maxWidth: '900px',
+        maxHeight: '90vh',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        boxShadow: '0 20px 50px rgba(0,0,0,0.25)',
+        position: 'relative'
+      }}>
+        {/* Action Buttons */}
+        <div className="no-print" style={{
+          flexShrink: 0,
+          backgroundColor: 'white',
+          padding: '1rem',
+          borderBottom: '1px solid #e2e8f0',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          zIndex: 10
+        }}>
+          <h2 style={{ fontSize: '1.25rem', fontWeight: '600', color: '#111827', margin: 0 }}>
+            Job Sheet Preview
+          </h2>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button
+              onClick={handlePrint}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.5rem 1rem',
+                backgroundColor: '#2563eb',
+                color: 'white',
+                border: 'none',
+                borderRadius: '0.375rem',
+                fontSize: '0.875rem',
+                fontWeight: '500',
+                cursor: 'pointer'
+              }}
+            >
+              <Printer style={{ width: '1rem', height: '1rem' }} />
+              Print Job Sheet
+            </button>
+            <button
+              onClick={onClose}
+              style={{
+                padding: '0.5rem',
+                backgroundColor: '#f3f4f6',
+                border: 'none',
+                borderRadius: '0.375rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center'
+              }}
+            >
+              <X style={{ width: '1.25rem', height: '1.25rem', color: '#6b7280' }} />
+            </button>
+          </div>
+        </div>
+
+        {/* Print Content - Scrollable */}
+        <div ref={printRef} style={{ 
+          padding: '15px', 
+          backgroundColor: 'white',
+          overflowY: 'auto',
+          flex: 1,
+          minHeight: 0
+        }}>
+          {/* Header */}
+          <div className="header">
+            <div className="header-top">
+              <div className="logo-section">
+                <svg
+                  className="logo-svg"
+                  viewBox="0 0 100 85"
+                  xmlns="http://www.w3.org/2000/svg"
+                  style={{ width: '45px', height: '38px', flexShrink: 0 }}
+                >
+                  <path
+                    d="M10 5 L90 5 L90 25 L35 25 L90 60 L90 80 L10 80 L10 60 L65 60 L10 25 Z"
+                    fill="#06b6d4"
+                  />
+                  <path
+                    d="M35 60 L30 55 Q25 50, 25 45 L25 48 L75 48 L75 45 Q75 50, 70 55 L65 60"
+                    fill="#06b6d4"
+                  />
+                  <path
+                    d="M35 60 Q30 55, 25 50"
+                    stroke="#06b6d4"
+                    strokeWidth="2"
+                    fill="none"
+                    opacity="0.8"
+                  />
+                  <path
+                    d="M65 60 Q70 55, 75 50"
+                    stroke="#06b6d4"
+                    strokeWidth="2"
+                    fill="none"
+                    opacity="0.8"
+                  />
+                  <path
+                    d="M28 68 Q30 70, 35 68 Q40 66, 45 68 Q50 70, 55 68 Q60 66, 65 68 Q70 70, 72 68"
+                    stroke="#06b6d4"
+                    strokeWidth="2.5"
+                    fill="none"
+                    strokeLinecap="round"
+                  />
+                  <ellipse cx="38" cy="68" rx="8" ry="5" fill="none" stroke="#06b6d4" strokeWidth="3" />
+                  <ellipse cx="62" cy="68" rx="8" ry="5" fill="none" stroke="#06b6d4" strokeWidth="3" />
+                </svg>
+                <div className="logo-text">
+                  <div className="logo-text-main">ZORAVO</div>
+                  <div className="logo-text-sub">OMS</div>
+                </div>
+              </div>
+              <div className="company-header-section">
+                <div className="company-name-main">{companyName}</div>
+                <div className="company-location-main">{companyLocation}</div>
+              </div>
+              <div style={{ width: '120px', flexShrink: 0 }}></div>
+            </div>
+            <div className="header-bottom">
+              <div>
+                <h1 style={{ margin: 0, fontSize: '18pt', color: '#2563eb', fontWeight: 'bold' }}>JOB SHEET</h1>
+                <div className="subtitle" style={{ color: '#64748b', fontSize: '8pt', marginTop: '2px' }}>
+                  Vehicle Installation & Service Record
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontWeight: 'bold', fontSize: '9pt', color: '#1e293b' }}>
+                  Job ID: {vehicle.short_id || vehicle.id.substring(0, 8).toUpperCase()}
+                </div>
+                <div style={{ fontSize: '8pt', color: '#64748b', marginTop: '2px' }}>
+                  Date: {formatDate(vehicle.created_at)}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Vehicle Information */}
+          <div className="section">
+            <div className="section-title">VEHICLE INFORMATION</div>
+            <div className="info-grid">
+              <div className="info-item">
+                <div className="info-label">Registration Number</div>
+                <div className="info-value">{vehicle.registration_number || 'N/A'}</div>
+              </div>
+              <div className="info-item">
+                <div className="info-label">Make & Model</div>
+                <div className="info-value">{vehicle.make || 'N/A'} {vehicle.model || ''}</div>
+              </div>
+              <div className="info-item">
+                <div className="info-label">Year</div>
+                <div className="info-value">{vehicle.year || 'N/A'}</div>
+              </div>
+              <div className="info-item">
+                <div className="info-label">Color</div>
+                <div className="info-value">{vehicle.color || 'N/A'}</div>
+              </div>
+              <div className="info-item">
+                <div className="info-label">Vehicle Type</div>
+                <div className="info-value">{vehicleTypeName || vehicle.vehicle_type || 'N/A'}</div>
+              </div>
+              <div className="info-item">
+                <div className="info-label">Odometer Reading</div>
+                <div className="info-value">{vehicle.odometer_reading ? `${vehicle.odometer_reading} km` : 'N/A'}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Customer Information */}
+          <div className="section">
+            <div className="section-title">CUSTOMER INFORMATION</div>
+            <div className="info-grid">
+              <div className="info-item">
+                <div className="info-label">Customer Name</div>
+                <div className="info-value">{vehicle.customer_name || 'N/A'}</div>
+              </div>
+              {vehicle.customer_email && (
+                <div className="info-item">
+                  <div className="info-label">Email Address</div>
+                  <div className="info-value">{vehicle.customer_email}</div>
+                </div>
+              )}
+              {(vehicle.customer_address || vehicle.customer_city) && (
+                <div className="info-item full-width">
+                  <div className="info-label">Address</div>
+                  <div className="info-value">
+                    {[
+                      vehicle.customer_address,
+                      vehicle.customer_city,
+                      vehicle.customer_state,
+                      vehicle.customer_pincode
+                    ].filter(Boolean).join(', ')}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Work Details */}
+          <div className="section">
+            <div className="section-title">WORK DETAILS</div>
+            {vehicle.issues_reported && (
+              <div style={{ marginBottom: '8px' }}>
+                <div className="info-label">Issues Reported</div>
+                <div className="notes-box">
+                  {vehicle.issues_reported}
+                </div>
+              </div>
+            )}
+            
+            {products.length > 0 && (
+              <div style={{ marginTop: '8px' }}>
+                <div className="info-label" style={{ marginBottom: '4px' }}>Accessories/Products to Install</div>
+                <table className="products-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: '5%' }}>#</th>
+                      <th style={{ width: '30%' }}>Product Name</th>
+                      <th style={{ width: '25%' }}>Brand</th>
+                      <th style={{ width: '20%' }}>Department</th>
+                      <th style={{ width: '20%', textAlign: 'left' }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {products.map((product: any, index: number) => (
+                      <tr key={index}>
+                        <td>{index + 1}</td>
+                        <td>{product.product || 'N/A'}</td>
+                        <td>{product.brand || 'N/A'}</td>
+                        <td>{product.department || 'N/A'}</td>
+                        <td>
+                          <div className="status-cell">
+                            <div className="status-checkbox"></div>
+                            <span className="status-text">Completed</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Assignment & Status */}
+          <div className="section">
+            <div className="section-title">ASSIGNMENT & STATUS</div>
+            <div className="info-grid">
+              <div className="info-item">
+                <div className="info-label">Assigned Manager</div>
+                <div className="info-value">{managerName}</div>
+              </div>
+              {installerName && installerName !== 'Not Assigned' && (
+                <div className="info-item">
+                  <div className="info-label">Assigned Installer</div>
+                  <div className="info-value">{installerName}</div>
+                </div>
+              )}
+              <div className="info-item">
+                <div className="info-label">Location</div>
+                <div className="info-value">{locationName}</div>
+              </div>
+              <div className="info-item">
+                <div className="info-label">Priority</div>
+                <div className="info-value" style={{ textTransform: 'capitalize' }}>
+                  {vehicle.priority || 'Medium'}
+                </div>
+              </div>
+              <div className="info-item">
+                <div className="info-label">Current Status</div>
+                <div className="info-value" style={{ textTransform: 'capitalize', fontWeight: 'bold' }}>
+                  {vehicle.status?.replace('_', ' ') || 'Pending'}
+                </div>
+              </div>
+              {vehicle.estimated_completion_date && (
+                <div className="info-item">
+                  <div className="info-label">Expected Completion</div>
+                  <div className="info-value">{formatDate(vehicle.estimated_completion_date)}</div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Signature Section */}
+          <div className="signature-section">
+            <div className="signature-box">
+              <div className="signature-label">Installer Signature</div>
+              <div style={{ marginTop: '25px', fontSize: '8pt', color: '#64748b' }}>Date: _______________</div>
+            </div>
+            <div className="signature-box">
+              <div className="signature-label">Customer Signature</div>
+              <div style={{ marginTop: '25px', fontSize: '8pt', color: '#64748b' }}>Date: _______________</div>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="footer">
+            <div style={{ marginBottom: '3px', fontWeight: 'bold' }}>Zoravo OMS - Job Sheet</div>
+            <div>Generated on {formatDateTime(new Date().toISOString())}</div>
+            <div style={{ marginTop: '3px', fontSize: '7pt' }}>
+              This is an official record. Please retain for your records.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+

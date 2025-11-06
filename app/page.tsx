@@ -1,8 +1,6 @@
 'use client'
 
-import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { 
   Car, 
   Wrench, 
@@ -20,42 +18,8 @@ import {
 import Logo from '@/components/Logo'
 
 export default function LandingPage() {
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
   const router = useRouter()
-  const supabase = createClient()
 
-  const handleDemoLogin = async (role: string) => {
-    setLoading(true)
-    setError('')
-
-    try {
-      const credentials = {
-        admin: { email: 'admin@zoravo.com', password: 'admin123' },
-        manager: { email: 'manager@zoravo.com', password: 'manager123' },
-        coordinator: { email: 'coordinator@zoravo.com', password: 'coordinator123' }
-      }
-
-      const cred = credentials[role as keyof typeof credentials]
-      
-      // Store demo user in cookie
-      const demoUser = {
-        id: 'demo-' + role,
-        email: cred.email,
-        role: role,
-        name: role.charAt(0).toUpperCase() + role.slice(1)
-      }
-      
-      document.cookie = `demo-user=${JSON.stringify(demoUser)}; path=/; max-age=86400`
-      
-      router.push('/dashboard')
-      router.refresh()
-    } catch (err) {
-      setError('An unexpected error occurred. Please try again.')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const features = [
     {
@@ -246,65 +210,6 @@ export default function LandingPage() {
               </button>
             </div>
 
-            {/* Demo Login Buttons */}
-            <div style={{ marginTop: '2rem' }}>
-              <p style={{ color: 'rgba(255,255,255,0.8)', margin: '0 0 1rem 0', fontSize: '0.9rem' }}>
-                Try the demo with different roles:
-              </p>
-              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                {[
-                  { role: 'admin', label: 'Admin', color: '#dc2626' },
-                  { role: 'manager', label: 'Manager', color: '#2563eb' },
-                  { role: 'coordinator', label: 'Coordinator', color: '#059669' }
-                ].map(({ role, label, color }) => (
-                  <button
-                    key={role}
-                    onClick={() => handleDemoLogin(role)}
-                    disabled={loading}
-                    style={{
-                      padding: '0.5rem 1rem',
-                      backgroundColor: color,
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '0.25rem',
-                      fontSize: '0.875rem',
-                      fontWeight: '500',
-                      cursor: loading ? 'not-allowed' : 'pointer',
-                      opacity: loading ? 0.7 : 1,
-                      transition: 'all 0.2s'
-                    }}
-                    onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
-                      if (!loading) {
-                        e.currentTarget.style.transform = 'translateY(-1px)'
-                        e.currentTarget.style.opacity = '0.9'
-                      }
-                    }}
-                    onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
-                      if (!loading) {
-                        e.currentTarget.style.transform = 'translateY(0)'
-                        e.currentTarget.style.opacity = '1'
-                      }
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {error && (
-              <div style={{
-                marginTop: '1rem',
-                padding: '1rem',
-                backgroundColor: 'rgba(220,38,38,0.1)',
-                border: '1px solid rgba(220,38,38,0.3)',
-                borderRadius: '0.5rem',
-                color: '#dc2626',
-                fontSize: '0.875rem'
-              }}>
-                {error}
-              </div>
-            )}
           </div>
 
           {/* Right Content - Dashboard Preview */}
@@ -601,22 +506,7 @@ export default function LandingPage() {
           justifyContent: 'space-between',
           alignItems: 'center'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div style={{
-              width: '2rem',
-              height: '2rem',
-              borderRadius: '0.25rem',
-              background: 'linear-gradient(135deg, #2563eb 0%, #4f46e5 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}>
-              <Car style={{ color: 'white', width: '1rem', height: '1rem' }} />
-            </div>
-            <span style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>
-              Zoravo OMS
-            </span>
-          </div>
+          <Logo size="medium" showText={true} variant="light" />
           <p style={{ margin: 0, fontSize: '0.875rem', color: '#9ca3af' }}>
             © 2024 Zoravo OMS. All rights reserved.
           </p>

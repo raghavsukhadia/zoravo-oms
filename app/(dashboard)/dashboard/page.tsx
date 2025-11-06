@@ -1139,78 +1139,98 @@ export default function DashboardPage() {
                                 const isInstaller = userRole === 'installer'
                                 const isUpdating = updatingProductStatus.has(vehicle.id)
                                 
+                                // Helper function to convert hex to rgba with opacity
+                                const hexToRgba = (hex: string, opacity: number) => {
+                                  const r = parseInt(hex.slice(1, 3), 16)
+                                  const g = parseInt(hex.slice(3, 5), 16)
+                                  const b = parseInt(hex.slice(5, 7), 16)
+                                  return `rgba(${r}, ${g}, ${b}, ${opacity})`
+                                }
+                                
                                 return (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                                    {products.map((product: any, idx: number) => {
-                                      const isCompleted = completedIndices.has(idx)
-                                      const canToggle = isInstaller && !isUpdating && 
-                                        (vehicle.status === 'pending' || vehicle.status === 'in_progress' || vehicle.status === 'under_installation')
-                                      
-                                      return (
-                                        <div 
-                                          key={idx} 
-                                          style={{ 
-                                            fontSize: '0.8125rem',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.5rem',
-                                            padding: '0.25rem 0',
-                                            opacity: isCompleted ? 0.7 : 1
-                                          }}
-                                        >
-                                          {isInstaller && (
-                                            <input
-                                              type="checkbox"
-                                              checked={isCompleted}
-                                              onChange={() => handleProductToggle(vehicle.id, idx, products.length)}
-                                              disabled={!canToggle}
-                                              style={{
-                                                width: '1rem',
-                                                height: '1rem',
-                                                cursor: canToggle ? 'pointer' : 'not-allowed',
-                                                flexShrink: 0
-                                              }}
-                                              title={canToggle ? 'Mark as completed' : 'Cannot edit'}
-                                            />
-                                          )}
-                                          <span style={{ 
-                                            textDecoration: isCompleted ? 'line-through' : 'none',
-                                            color: isCompleted ? '#9ca3af' : '#111827'
-                                          }}>
-                                            <strong>{product.product || 'Product'}</strong>
-                                            {product.brand && ` - ${product.brand}`}
-                                            {product.department && (
-                                              <span style={{ marginLeft: '0.5rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                                                <span
+                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
+                                    <thead>
+                                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                        {isInstaller && (
+                                          <th style={{ padding: '0.5rem', textAlign: 'center', color: '#6b7280', fontWeight: '600', fontSize: '0.75rem', width: '2.5rem' }}>
+                                            ✓
+                                          </th>
+                                        )}
+                                        <th style={{ padding: '0.5rem', textAlign: 'left', color: '#6b7280', fontWeight: '600', fontSize: '0.75rem' }}>
+                                          Product
+                                        </th>
+                                        <th style={{ padding: '0.5rem', textAlign: 'left', color: '#6b7280', fontWeight: '600', fontSize: '0.75rem' }}>
+                                          Brand
+                                        </th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {products.map((product: any, idx: number) => {
+                                        const isCompleted = completedIndices.has(idx)
+                                        const canToggle = isInstaller && !isUpdating && 
+                                          (vehicle.status === 'pending' || vehicle.status === 'in_progress' || vehicle.status === 'under_installation')
+                                        const departmentColor = departmentColors.get(product.department) || '#3b82f6'
+                                        const bgColor = hexToRgba(departmentColor, 0.08)
+                                        const hoverBgColor = hexToRgba(departmentColor, 0.15)
+                                        
+                                        return (
+                                          <tr 
+                                            key={idx}
+                                            style={{ 
+                                              borderBottom: idx === products.length - 1 ? 'none' : '1px solid #e5e7eb',
+                                              backgroundColor: bgColor,
+                                              opacity: isCompleted ? 0.6 : 1,
+                                              transition: 'all 0.2s'
+                                            }}
+                                            onMouseEnter={(e) => {
+                                              if (!isCompleted) {
+                                                e.currentTarget.style.backgroundColor = hoverBgColor
+                                              }
+                                            }}
+                                            onMouseLeave={(e) => {
+                                              if (!isCompleted) {
+                                                e.currentTarget.style.backgroundColor = bgColor
+                                              }
+                                            }}
+                                          >
+                                            {isInstaller && (
+                                              <td style={{ padding: '0.75rem 0.5rem', textAlign: 'center' }}>
+                                                <input
+                                                  type="checkbox"
+                                                  checked={isCompleted}
+                                                  onChange={() => handleProductToggle(vehicle.id, idx, products.length)}
+                                                  disabled={!canToggle}
                                                   style={{
-                                                    display: 'inline-block',
-                                                    width: '8px',
-                                                    height: '8px',
-                                                    borderRadius: '50%',
-                                                    backgroundColor: departmentColors.get(product.department) || '#3b82f6',
-                                                    flexShrink: 0
+                                                    width: '1.125rem',
+                                                    height: '1.125rem',
+                                                    cursor: canToggle ? 'pointer' : 'not-allowed',
+                                                    accentColor: departmentColor
                                                   }}
+                                                  title={canToggle ? 'Mark as completed' : 'Cannot edit'}
                                                 />
-                                                <span style={{ color: '#6b7280', fontSize: '0.8125rem' }}>
-                                                  ({departmentNames.get(product.department) || product.department})
-                                                </span>
-                                              </span>
+                                              </td>
                                             )}
-                                          </span>
-                                          {isCompleted && (
-                                            <span style={{ 
-                                              fontSize: '0.7rem', 
-                                              color: '#059669',
-                                              fontWeight: '600',
-                                              marginLeft: 'auto'
+                                            <td style={{ 
+                                              padding: '0.75rem 0.5rem',
+                                              borderLeft: `4px solid ${departmentColor}`,
+                                              fontWeight: isCompleted ? 'normal' : '600',
+                                              textDecoration: isCompleted ? 'line-through' : 'none',
+                                              color: isCompleted ? '#9ca3af' : '#111827'
                                             }}>
-                                              ✓
-                                            </span>
-                                          )}
-                                        </div>
-                                      )
-                                    })}
-                                  </div>
+                                              {product.product || 'Product'}
+                                            </td>
+                                            <td style={{ 
+                                              padding: '0.75rem 0.5rem',
+                                              color: isCompleted ? '#9ca3af' : '#111827',
+                                              fontWeight: isCompleted ? 'normal' : '500'
+                                            }}>
+                                              {product.brand || '-'}
+                                            </td>
+                                          </tr>
+                                        )
+                                      })}
+                                    </tbody>
+                                  </table>
                                 )
                               }
                               return accessories

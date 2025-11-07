@@ -774,11 +774,11 @@ export default function PlatformSettingsPage() {
                       if (!Array.isArray(features)) {
                         return null
                       }
-                      if (features.length === 0) {
+                      // TypeScript type assertion after Array.isArray check
+                      const featuresArray = features as string[]
+                      if (featuresArray.length === 0) {
                         return null
                       }
-                      // TypeScript now knows features is a non-empty array
-                      const featuresArray: string[] = features
                       return (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                           {featuresArray.map((feature, idx) => (

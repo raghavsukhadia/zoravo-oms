@@ -768,12 +768,20 @@ export default function PlatformSettingsPage() {
                     </div>
                     {(() => {
                       const features = newPlan.features
-                      if (!features || !Array.isArray(features) || features.length === 0) {
+                      if (!features) {
                         return null
                       }
+                      if (!Array.isArray(features)) {
+                        return null
+                      }
+                      if (features.length === 0) {
+                        return null
+                      }
+                      // TypeScript now knows features is a non-empty array
+                      const featuresArray: string[] = features
                       return (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                          {features.map((feature, idx) => (
+                          {featuresArray.map((feature, idx) => (
                           <span
                             key={idx}
                             style={{

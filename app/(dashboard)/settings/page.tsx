@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Settings, User, Shield, Bell, Database, Save, Users, Wrench, MapPin, UserCheck, Edit, Trash2, Plus, X, DollarSign, Briefcase, Car, MessageSquare, Smartphone, ToggleLeft, ToggleRight, FileText } from 'lucide-react'
+import { Settings, User, Shield, Bell, Database, Save, Users, Wrench, MapPin, UserCheck, Edit, Trash2, Plus, X, DollarSign, Briefcase, Car, MessageSquare, Smartphone, ToggleLeft, ToggleRight, FileText, Clock, Mail, HelpCircle, CheckCircle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import UserManagementModal from '@/components/UserManagementModal'
 import { whatsappService, type WhatsAppConfig } from '@/lib/whatsapp-service'
+import { getCurrentTenantId, isSuperAdmin } from '@/lib/tenant-context'
 
 export default function SettingsPage() {
   const supabase = createClient()
@@ -91,6 +92,26 @@ export default function SettingsPage() {
   const [loadingWhatsapp, setLoadingWhatsapp] = useState(false)
   const [savingTemplates, setSavingTemplates] = useState(false)
   
+  // Payment proof state
+  const [paymentProofs, setPaymentProofs] = useState<any[]>([])
+  const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null)
+  const [isActive, setIsActive] = useState(true)
+  const [subscriptionStatus, setSubscriptionStatus] = useState<string>('trial')
+  const [subscription, setSubscription] = useState<any>(null)
+  const [paymentForm, setPaymentForm] = useState({
+    file: null as File | null,
+    transactionId: '',
+    paymentDate: new Date().toISOString().split('T')[0],
+    notes: ''
+  })
+  const [uploadingProof, setUploadingProof] = useState(false)
+
+  // Subscription activation state
+  const [requestingActivation, setRequestingActivation] = useState(false)
+  const [activationRequestStatus, setActivationRequestStatus] = useState<any>(null)
+  const [supportEmails, setSupportEmails] = useState<string[]>([])
+  const [loadingSupport, setLoadingSupport] = useState(false)
+  
   // Filter users by role
   const coordinators = users.filter(u => u.role === 'coordinator')
   const installersUsers = users.filter(u => u.role === 'installer')
@@ -105,10 +126,13 @@ export default function SettingsPage() {
     { id: 'company', label: 'Company', icon: Settings },
     { id: 'management', label: 'Management', icon: Users },
     { id: 'notifications', label: 'Notifications', icon: Bell },
+    { id: 'payment', label: 'Payment', icon: DollarSign },
     { id: 'security', label: 'Security', icon: Shield },
     { id: 'database', label: 'Database', icon: Database },
   ]
-  const filteredTabs = (userRole === 'installer' || userRole === 'coordinator' || userRole === 'manager' || userRole === 'accountant') ? tabs.filter(t => t.id === 'company') : tabs
+  const filteredTabs = (userRole === 'installer' || userRole === 'coordinator' || userRole === 'manager' || userRole === 'accountant') 
+    ? tabs.filter(t => t.id === 'company') 
+    : tabs.filter(t => t.id !== 'payment' || userRole === 'admin') // Show payment tab only for admins
 
   // Load data from Supabase on mount
   useEffect(() => {
@@ -124,13 +148,31 @@ export default function SettingsPage() {
     fetchWhatsappSettings()
     fetchNotificationPreferences()
     fetchMessageTemplates()
+    fetchPaymentProofs()
   }, [])
 
   const loadCurrentUser = async () => {
     try {
+      const tenantId = getCurrentTenantId()
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         setCurrentUser(user)
+        
+        // Check if user is admin in tenant_users table (for tenant admins)
+        let isTenantAdmin = false
+        if (tenantId) {
+          const { data: tenantUser } = await supabase
+            .from('tenant_users')
+            .select('role')
+            .eq('tenant_id', tenantId)
+            .eq('user_id', user.id)
+            .eq('role', 'admin')
+            .single()
+          
+          if (tenantUser) {
+            isTenantAdmin = true
+          }
+        }
         
         // Fetch profile data
         const { data: profile, error } = await supabase
@@ -140,8 +182,11 @@ export default function SettingsPage() {
           .single()
         
         if (!error && profile) {
-          setUserRole(profile.role)
-          if (profile.role === 'installer' || profile.role === 'coordinator' || profile.role === 'manager' || profile.role === 'accountant') {
+          // If user is tenant admin, set role to 'admin' regardless of profile role
+          const effectiveRole = isTenantAdmin ? 'admin' : profile.role
+          setUserRole(effectiveRole as any)
+          
+          if (effectiveRole === 'installer' || effectiveRole === 'coordinator' || effectiveRole === 'manager' || effectiveRole === 'accountant') {
             setActiveTab('company')
           }
           setProfileSettings(prev => ({
@@ -151,6 +196,10 @@ export default function SettingsPage() {
           }))
         } else {
           // Use auth user data if profile not found
+          // If tenant admin, set role to admin
+          if (isTenantAdmin) {
+            setUserRole('admin')
+          }
           setProfileSettings(prev => ({
             ...prev,
             email: user.email || prev.email,
@@ -163,17 +212,251 @@ export default function SettingsPage() {
     }
   }
 
+  const fetchPaymentProofs = async () => {
+    try {
+      const response = await fetch('/api/tenants/payment-proof')
+      if (response.ok) {
+        const data = await response.json()
+        setPaymentProofs(data.payment_proofs || [])
+        setTrialEndsAt(data.tenant?.trial_ends_at)
+        setIsActive(data.tenant?.is_active || false)
+        setSubscriptionStatus(data.tenant?.subscription_status || 'trial')
+        setSubscription(data.subscription || null)
+      }
+    } catch (error) {
+      console.error('Error fetching payment proofs:', error)
+    }
+  }
+
+  const fetchSupportEmails = async () => {
+    try {
+      setLoadingSupport(true)
+      const response = await fetch('/api/admin/support-emails')
+      if (response.ok) {
+        const data = await response.json()
+        setSupportEmails(data.emails || [])
+      }
+    } catch (error) {
+      console.error('Error fetching support emails:', error)
+    } finally {
+      setLoadingSupport(false)
+    }
+  }
+
+  const checkActivationRequestStatus = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const { data: tenantUser } = await supabase
+        .from('tenant_users')
+        .select('tenant_id')
+        .eq('user_id', user.id)
+        .eq('role', 'admin')
+        .single()
+
+      if (!tenantUser) return
+
+      // Check for pending activation request (subscription plan request for annual plan)
+      const { data: request } = await supabase
+        .from('subscription_plan_requests')
+        .select('*')
+        .eq('tenant_id', tenantUser.tenant_id)
+        .eq('status', 'pending')
+        .order('requested_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      setActivationRequestStatus(request)
+    } catch (error) {
+      console.error('Error checking activation request status:', error)
+    }
+  }
+
+  const handleRequestActivation = async () => {
+    try {
+      setRequestingActivation(true)
+      
+      // Request the standard annual plan (₹12,000/year)
+      const response = await fetch('/api/tenants/subscription-plans', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          plan_name: 'annual',
+          plan_display_name: 'Annual Plan',
+          amount: 12000,
+          currency: 'INR',
+          billing_cycle: 'annual'
+        })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        alert('Activation request submitted successfully! Super admin will review your request and activate your account after payment verification.')
+        checkActivationRequestStatus()
+      } else {
+        alert(data.error || 'Failed to submit activation request')
+      }
+    } catch (error) {
+      console.error('Error requesting activation:', error)
+      alert('An error occurred while submitting the activation request')
+    } finally {
+      setRequestingActivation(false)
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab === 'payment' && userRole === 'admin') {
+      fetchPaymentProofs()
+      fetchSupportEmails()
+      checkActivationRequestStatus()
+    }
+  }, [activeTab, userRole])
+
+  const handlePaymentProofSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!paymentForm.file) {
+      alert('Please select a payment proof file')
+      return
+    }
+
+    setUploadingProof(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', paymentForm.file)
+      formData.append('transactionId', paymentForm.transactionId)
+      formData.append('paymentDate', paymentForm.paymentDate)
+      formData.append('notes', paymentForm.notes)
+
+      const response = await fetch('/api/tenants/payment-proof', {
+        method: 'POST',
+        body: formData
+      })
+
+      // Check if response is ok before parsing
+      if (!response.ok) {
+        // Try to get error message from response
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`
+        
+        // Check if response is JSON
+        const contentType = response.headers.get('content-type')
+        if (contentType && contentType.includes('application/json')) {
+          try {
+            const errorData = await response.json()
+            errorMessage = errorData.error || errorData.details || errorMessage
+          } catch (e) {
+            // If JSON parsing fails, try to get text
+            try {
+              const text = await response.text()
+              if (text && text.trim()) {
+                errorMessage = text
+              }
+            } catch (textError) {
+              console.error('Failed to read error response:', textError)
+            }
+          }
+        } else {
+          // Response is not JSON, try to get text
+          try {
+            const text = await response.text()
+            if (text && text.trim()) {
+              errorMessage = text
+            }
+          } catch (textError) {
+            console.error('Failed to read error response:', textError)
+          }
+        }
+        
+        alert(errorMessage || 'Failed to submit payment proof')
+        return
+      }
+
+      // Parse successful response
+      let data: any = {}
+      try {
+        data = await response.json()
+      } catch (e) {
+        console.error('Failed to parse response as JSON:', e)
+        alert('Payment proof submitted, but received an unexpected response format.')
+        return
+      }
+
+      alert('Payment proof submitted successfully! It will be reviewed by super admin.')
+      setPaymentForm({
+        file: null,
+        transactionId: '',
+        paymentDate: new Date().toISOString().split('T')[0],
+        notes: ''
+      })
+      fetchPaymentProofs()
+    } catch (error: any) {
+      console.error('Error submitting payment proof:', error)
+      alert(`An error occurred while submitting payment proof: ${error?.message || 'Unknown error'}`)
+    } finally {
+      setUploadingProof(false)
+    }
+  }
+
+  const calculateTimeRemaining = () => {
+    if (!trialEndsAt) return null
+    const now = new Date().getTime()
+    const end = new Date(trialEndsAt).getTime()
+    const diff = end - now
+    
+    if (diff <= 0) return { days: 0, hours: 0, minutes: 0, seconds: 0, expired: true }
+    
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000)
+    return { days, hours, minutes, seconds, expired: false }
+  }
+
+  const timeRemaining = calculateTimeRemaining()
+  
   // Fetch functions
   const fetchUsers = async () => {
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .in('role', ['coordinator', 'installer', 'accountant', 'manager'])
-        .order('created_at', { ascending: false })
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
       
-      if (error) throw error
-      setUsers(data || [])
+      // For tenant users, get users from tenant_users table
+      if (!isSuper && tenantId) {
+        const { data: tenantUsers, error: tenantUsersError } = await supabase
+          .from('tenant_users')
+          .select('user_id, role')
+          .eq('tenant_id', tenantId)
+          .in('role', ['coordinator', 'installer', 'accountant', 'manager'])
+        
+        if (tenantUsersError) throw tenantUsersError
+        
+        if (tenantUsers && tenantUsers.length > 0) {
+          const userIds = tenantUsers.map(tu => tu.user_id)
+          const { data: profiles, error: profilesError } = await supabase
+            .from('profiles')
+            .select('*')
+            .in('id', userIds)
+            .order('created_at', { ascending: false })
+          
+          if (profilesError) throw profilesError
+          setUsers(profiles || [])
+        } else {
+          setUsers([])
+        }
+      } else {
+        // Super admin sees all users
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .in('role', ['coordinator', 'installer', 'accountant', 'manager'])
+          .order('created_at', { ascending: false })
+        
+        if (error) throw error
+        setUsers(data || [])
+      }
     } catch (error) {
       console.error('Error fetching users:', error)
     }
@@ -181,51 +464,238 @@ export default function SettingsPage() {
 
   const fetchInstallers = async () => {
     try {
-      // Fetch installers from profiles table (where they're actually stored)
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('role', 'installer')
-        .order('created_at', { ascending: false })
-      if (error) throw error
-      setInstallersList(data || [])
+      let tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      console.log('🔍 fetchInstallers - tenantId:', tenantId, 'isSuper:', isSuper)
+      
+      // If tenant_id is missing, try to fetch it from database
+      if (!isSuper && !tenantId) {
+        console.warn('⚠️ tenant_id not found in sessionStorage, fetching from database...')
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data: tenantUser } = await supabase
+            .from('tenant_users')
+            .select('tenant_id')
+            .eq('user_id', user.id)
+            .single()
+          
+          if (tenantUser?.tenant_id) {
+            tenantId = tenantUser.tenant_id
+            sessionStorage.setItem('current_tenant_id', tenantId)
+            console.log('✅ tenant_id fetched and set:', tenantId)
+          }
+        }
+      }
+      
+      if (!isSuper && tenantId) {
+        // Get installers for this tenant
+        console.log('📋 Fetching installers for tenant:', tenantId)
+        const { data: tenantUsers, error: tenantUsersError } = await supabase
+          .from('tenant_users')
+          .select('user_id, role, tenant_id')
+          .eq('tenant_id', tenantId)
+          .eq('role', 'installer')
+        
+        console.log('📋 tenant_users query result:', { tenantUsers, error: tenantUsersError })
+        
+        if (tenantUsersError) {
+          console.error('❌ Error fetching tenant_users:', tenantUsersError)
+          throw tenantUsersError
+        }
+        
+        if (tenantUsers && tenantUsers.length > 0) {
+          const userIds = tenantUsers.map(tu => tu.user_id)
+          console.log('📋 Found', userIds.length, 'installer user IDs:', userIds)
+          
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .in('id', userIds)
+            .order('created_at', { ascending: false })
+          
+          if (error) {
+            console.error('❌ Error fetching profiles:', error)
+            throw error
+          }
+          
+          console.log('✅ Fetched', data?.length || 0, 'installers:', data)
+          setInstallersList(data || [])
+        } else {
+          console.warn('⚠️ No installers found in tenant_users for tenant:', tenantId)
+          setInstallersList([])
+        }
+      } else {
+        // Super admin sees all installers
+        console.log('👑 Super admin mode - fetching all installers')
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('role', 'installer')
+          .order('created_at', { ascending: false })
+        if (error) throw error
+        console.log('✅ Fetched', data?.length || 0, 'installers (super admin)')
+        setInstallersList(data || [])
+      }
     } catch (error) {
-      console.error('Error fetching installers:', error)
+      console.error('❌ Error fetching installers:', error)
+      setInstallersList([])
     }
   }
 
   const fetchManagers = async () => {
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('role', 'manager')
-        .order('created_at', { ascending: false })
-      if (error) throw error
-      setManagers(data || [])
+      let tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      console.log('🔍 fetchManagers - tenantId:', tenantId, 'isSuper:', isSuper)
+      
+      // If tenant_id is missing, try to fetch it from database
+      if (!isSuper && !tenantId) {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data: tenantUser } = await supabase
+            .from('tenant_users')
+            .select('tenant_id')
+            .eq('user_id', user.id)
+            .single()
+          
+          if (tenantUser?.tenant_id) {
+            tenantId = tenantUser.tenant_id
+            sessionStorage.setItem('current_tenant_id', tenantId)
+            console.log('✅ tenant_id fetched and set:', tenantId)
+          }
+        }
+      }
+      
+      if (!isSuper && tenantId) {
+        // Get managers for this tenant
+        console.log('📋 Fetching managers for tenant:', tenantId)
+        const { data: tenantUsers, error: tenantUsersError } = await supabase
+          .from('tenant_users')
+          .select('user_id, role, tenant_id')
+          .eq('tenant_id', tenantId)
+          .eq('role', 'manager')
+        
+        console.log('📋 tenant_users query result:', { tenantUsers, error: tenantUsersError })
+        
+        if (tenantUsersError) throw tenantUsersError
+        
+        if (tenantUsers && tenantUsers.length > 0) {
+          const userIds = tenantUsers.map(tu => tu.user_id)
+          console.log('📋 Found', userIds.length, 'manager user IDs:', userIds)
+          
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .in('id', userIds)
+            .order('created_at', { ascending: false })
+          if (error) throw error
+          console.log('✅ Fetched', data?.length || 0, 'managers')
+          setManagers(data || [])
+        } else {
+          console.warn('⚠️ No managers found in tenant_users for tenant:', tenantId)
+          setManagers([])
+        }
+      } else {
+        // Super admin sees all managers
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('role', 'manager')
+          .order('created_at', { ascending: false })
+        if (error) throw error
+        setManagers(data || [])
+      }
     } catch (error) {
-      console.error('Error fetching managers:', error)
+      console.error('❌ Error fetching managers:', error)
+      setManagers([])
     }
   }
 
   const fetchAccountants = async () => {
     try {
-      // Fetch accountants only from profiles table (do NOT include coordinators)
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('role', 'accountant')
-        .order('created_at', { ascending: false })
-      if (error) throw error
-      setAccountantsList(data || [])
+      let tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      console.log('🔍 fetchAccountants - tenantId:', tenantId, 'isSuper:', isSuper)
+      
+      // If tenant_id is missing, try to fetch it from database
+      if (!isSuper && !tenantId) {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data: tenantUser } = await supabase
+            .from('tenant_users')
+            .select('tenant_id')
+            .eq('user_id', user.id)
+            .single()
+          
+          if (tenantUser?.tenant_id) {
+            tenantId = tenantUser.tenant_id
+            sessionStorage.setItem('current_tenant_id', tenantId)
+            console.log('✅ tenant_id fetched and set:', tenantId)
+          }
+        }
+      }
+      
+      if (!isSuper && tenantId) {
+        // Get accountants for this tenant
+        console.log('📋 Fetching accountants for tenant:', tenantId)
+        const { data: tenantUsers, error: tenantUsersError } = await supabase
+          .from('tenant_users')
+          .select('user_id, role, tenant_id')
+          .eq('tenant_id', tenantId)
+          .eq('role', 'accountant')
+        
+        console.log('📋 tenant_users query result:', { tenantUsers, error: tenantUsersError })
+        
+        if (tenantUsersError) throw tenantUsersError
+        
+        if (tenantUsers && tenantUsers.length > 0) {
+          const userIds = tenantUsers.map(tu => tu.user_id)
+          console.log('📋 Found', userIds.length, 'accountant user IDs:', userIds)
+          
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .in('id', userIds)
+            .order('created_at', { ascending: false })
+          if (error) throw error
+          console.log('✅ Fetched', data?.length || 0, 'accountants')
+          setAccountantsList(data || [])
+        } else {
+          console.warn('⚠️ No accountants found in tenant_users for tenant:', tenantId)
+          setAccountantsList([])
+        }
+      } else {
+        // Super admin sees all accountants
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('role', 'accountant')
+          .order('created_at', { ascending: false })
+        if (error) throw error
+        setAccountantsList(data || [])
+      }
     } catch (error) {
-      console.error('Error fetching accountants:', error)
+      console.error('❌ Error fetching accountants:', error)
+      setAccountantsList([])
     }
   }
 
   const fetchLocations = async () => {
     try {
-      const { data, error } = await supabase.from('locations').select('*').order('created_at', { ascending: false })
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      let query = supabase.from('locations').select('*').order('created_at', { ascending: false })
+      
+      // Add tenant filter
+      if (!isSuper && tenantId) {
+        query = query.eq('tenant_id', tenantId)
+      }
+      
+      const { data, error } = await query
       if (error) throw error
       setLocations(data || [])
     } catch (error) {
@@ -235,7 +705,17 @@ export default function SettingsPage() {
 
   const fetchVehicleTypes = async () => {
     try {
-      const { data, error } = await supabase.from('vehicle_types').select('*').order('name', { ascending: true })
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      let query = supabase.from('vehicle_types').select('*').order('name', { ascending: true })
+      
+      // Add tenant filter
+      if (!isSuper && tenantId) {
+        query = query.eq('tenant_id', tenantId)
+      }
+      
+      const { data, error } = await query
       if (error) throw error
       setVehicleTypes(data || [])
     } catch (error) {
@@ -245,7 +725,17 @@ export default function SettingsPage() {
 
   const fetchDepartments = async () => {
     try {
-      const { data, error } = await supabase.from('departments').select('*').order('name', { ascending: true })
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      let query = supabase.from('departments').select('*').order('name', { ascending: true })
+      
+      // Add tenant filter
+      if (!isSuper && tenantId) {
+        query = query.eq('tenant_id', tenantId)
+      }
+      
+      const { data, error } = await query
       if (error) throw error
       setDepartments(data || [])
     } catch (error) {
@@ -270,7 +760,8 @@ export default function SettingsPage() {
   const fetchWhatsappSettings = async () => {
     try {
       setLoadingWhatsapp(true)
-      const config = await whatsappService.loadConfig(supabase)
+      const tenantId = getCurrentTenantId()
+      const config = await whatsappService.loadConfig(supabase, tenantId)
       if (config) {
         setWhatsappConfig(config)
       }
@@ -400,26 +891,163 @@ export default function SettingsPage() {
   const saveWhatsappSettings = async () => {
     try {
       setSavingWhatsapp(true)
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
 
       const settings = [
-        { setting_key: 'whatsapp_enabled', setting_value: whatsappConfig.enabled.toString(), setting_group: 'whatsapp_notifications' },
-        { setting_key: 'whatsapp_provider', setting_value: whatsappConfig.provider, setting_group: 'whatsapp_notifications' },
-        { setting_key: 'whatsapp_user_id', setting_value: whatsappConfig.userId || '', setting_group: 'whatsapp_notifications' },
-        { setting_key: 'whatsapp_password', setting_value: whatsappConfig.password || '', setting_group: 'whatsapp_notifications' },
-        { setting_key: 'whatsapp_api_key', setting_value: whatsappConfig.apiKey || '', setting_group: 'whatsapp_notifications' },
-        { setting_key: 'whatsapp_from_number', setting_value: whatsappConfig.fromNumber || '', setting_group: 'whatsapp_notifications' },
-        { setting_key: 'whatsapp_account_sid', setting_value: whatsappConfig.accountSid || '', setting_group: 'whatsapp_notifications' },
-        { setting_key: 'whatsapp_auth_token', setting_value: whatsappConfig.authToken || '', setting_group: 'whatsapp_notifications' },
-        { setting_key: 'whatsapp_business_account_id', setting_value: whatsappConfig.businessAccountId || '', setting_group: 'whatsapp_notifications' },
-        { setting_key: 'whatsapp_access_token', setting_value: whatsappConfig.accessToken || '', setting_group: 'whatsapp_notifications' },
-        { setting_key: 'whatsapp_webhook_url', setting_value: whatsappConfig.webhookUrl || '', setting_group: 'whatsapp_notifications' },
-        { setting_key: 'whatsapp_api_secret', setting_value: whatsappConfig.apiSecret || '', setting_group: 'whatsapp_notifications' },
+        { 
+          setting_key: 'whatsapp_enabled', 
+          setting_value: whatsappConfig.enabled.toString(), 
+          setting_group: 'whatsapp_notifications',
+          tenant_id: (!isSuper && tenantId) ? tenantId : null
+        },
+        { 
+          setting_key: 'whatsapp_provider', 
+          setting_value: whatsappConfig.provider, 
+          setting_group: 'whatsapp_notifications',
+          tenant_id: (!isSuper && tenantId) ? tenantId : null
+        },
+        { 
+          setting_key: 'whatsapp_user_id', 
+          setting_value: whatsappConfig.userId || '', 
+          setting_group: 'whatsapp_notifications',
+          tenant_id: (!isSuper && tenantId) ? tenantId : null
+        },
+        { 
+          setting_key: 'whatsapp_password', 
+          setting_value: whatsappConfig.password || '', 
+          setting_group: 'whatsapp_notifications',
+          tenant_id: (!isSuper && tenantId) ? tenantId : null
+        },
+        { 
+          setting_key: 'whatsapp_api_key', 
+          setting_value: whatsappConfig.apiKey || '', 
+          setting_group: 'whatsapp_notifications',
+          tenant_id: (!isSuper && tenantId) ? tenantId : null
+        },
+        { 
+          setting_key: 'whatsapp_from_number', 
+          setting_value: whatsappConfig.fromNumber || '', 
+          setting_group: 'whatsapp_notifications',
+          tenant_id: (!isSuper && tenantId) ? tenantId : null
+        },
+        { 
+          setting_key: 'whatsapp_account_sid', 
+          setting_value: whatsappConfig.accountSid || '', 
+          setting_group: 'whatsapp_notifications',
+          tenant_id: (!isSuper && tenantId) ? tenantId : null
+        },
+        { 
+          setting_key: 'whatsapp_auth_token', 
+          setting_value: whatsappConfig.authToken || '', 
+          setting_group: 'whatsapp_notifications',
+          tenant_id: (!isSuper && tenantId) ? tenantId : null
+        },
+        { 
+          setting_key: 'whatsapp_business_account_id', 
+          setting_value: whatsappConfig.businessAccountId || '', 
+          setting_group: 'whatsapp_notifications',
+          tenant_id: (!isSuper && tenantId) ? tenantId : null
+        },
+        { 
+          setting_key: 'whatsapp_access_token', 
+          setting_value: whatsappConfig.accessToken || '', 
+          setting_group: 'whatsapp_notifications',
+          tenant_id: (!isSuper && tenantId) ? tenantId : null
+        },
+        { 
+          setting_key: 'whatsapp_webhook_url', 
+          setting_value: whatsappConfig.webhookUrl || '', 
+          setting_group: 'whatsapp_notifications',
+          tenant_id: (!isSuper && tenantId) ? tenantId : null
+        },
+        { 
+          setting_key: 'whatsapp_api_secret', 
+          setting_value: whatsappConfig.apiSecret || '', 
+          setting_group: 'whatsapp_notifications',
+          tenant_id: (!isSuper && tenantId) ? tenantId : null
+        },
       ]
 
       for (const setting of settings) {
-        await supabase
+        // CRITICAL: Always filter by tenant_id to ensure data isolation
+        // For tenant users, tenantId must be set and not null
+        if (!tenantId && !isSuper) {
+          console.error('Cannot save WhatsApp settings: tenantId is required for tenant users')
+          throw new Error('Tenant ID is required to save settings')
+        }
+        
+        // Check if setting exists for this specific tenant
+        let query = supabase
           .from('system_settings')
-          .upsert(setting, { onConflict: 'setting_key' })
+          .select('id, tenant_id')
+          .eq('setting_key', setting.setting_key)
+          .eq('setting_group', setting.setting_group)
+        
+        // CRITICAL: Always filter by tenant_id for tenant users
+        if (tenantId && !isSuper) {
+          query = query.eq('tenant_id', tenantId)
+        } else if (isSuper) {
+          // Super admin can have global settings (null tenant_id)
+          query = query.is('tenant_id', null)
+        } else {
+          // This should not happen, but handle it
+          throw new Error('Invalid tenant context')
+        }
+        
+        const { data: existing, error: queryError } = await query.maybeSingle()
+        
+        if (queryError) {
+          console.error('Error checking existing WhatsApp setting:', queryError)
+          throw queryError
+        }
+        
+        if (existing) {
+          // Update existing setting - CRITICAL: Verify tenant_id matches
+          if (tenantId && !isSuper && existing.tenant_id !== tenantId) {
+            console.error('Security violation: Attempted to update WhatsApp setting from different tenant', {
+              existingTenantId: existing.tenant_id,
+              currentTenantId: tenantId
+            })
+            throw new Error('Cannot update settings from another tenant')
+          }
+          
+          // Update with explicit tenant_id filter for security
+          let updateQuery = supabase
+            .from('system_settings')
+            .update({
+              setting_value: setting.setting_value,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', existing.id)
+          
+          // Add tenant_id filter for extra security
+          if (tenantId && !isSuper) {
+            updateQuery = updateQuery.eq('tenant_id', tenantId)
+          }
+          
+          const { error: updateError } = await updateQuery
+          
+          if (updateError) {
+            console.error('Error updating WhatsApp setting:', updateError)
+            throw updateError
+          }
+        } else {
+          // Insert new setting - ensure tenant_id is set
+          const insertData = {
+            ...setting,
+            tenant_id: (tenantId && !isSuper) ? tenantId : null
+          }
+          
+          const { error: insertError } = await supabase
+            .from('system_settings')
+            .insert(insertData)
+          
+          if (insertError) {
+            console.error('Error inserting WhatsApp setting:', insertError, insertData)
+            throw insertError
+          }
+        }
       }
 
       // Initialize WhatsApp service with new config
@@ -453,10 +1081,38 @@ export default function SettingsPage() {
 
   const fetchSystemSettings = async () => {
     try {
-      const { data, error } = await supabase
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      // First, try to load company info from tenants table (most accurate)
+      if (tenantId && !isSuper) {
+        const { data: tenant, error: tenantError } = await supabase
+          .from('tenants')
+          .select('name, workspace_url')
+          .eq('id', tenantId)
+          .single()
+        
+        if (!tenantError && tenant) {
+          // Set company name from tenant
+          setCompanySettings(prev => ({
+            ...prev,
+            name: tenant.name
+          }))
+        }
+      }
+      
+      // Load settings from system_settings table (filtered by tenant)
+      let query = supabase
         .from('system_settings')
         .select('*')
         .in('setting_group', ['profile', 'company'])
+      
+      // Add tenant filter
+      if (!isSuper && tenantId) {
+        query = query.eq('tenant_id', tenantId)
+      }
+      
+      const { data, error } = await query
       
       if (error) throw error
       
@@ -483,23 +1139,47 @@ export default function SettingsPage() {
         setCompanySettings(prev => ({ ...prev, ...companyData }))
       } else {
         // Set default values if no settings found
-        setProfileSettings({
-          name: 'Raghav Sukhadia',
-          email: 'raghav@sunkool.in'
-        })
-        setCompanySettings({
-          name: 'RS Car Accessories',
-          address: '510, Western Palace, opposite Park, Congress Nagar, Nagpur, Maharashtra 440012',
-          phone: '081491 11110',
-          email: '',
-          website: '',
-          businessHours: 'Open ⋅ Closes 7 pm',
-          openingTime: '09:00',
-          closingTime: '19:00',
-          gstNumber: '',
-          panNumber: '',
-          registrationNumber: ''
-        })
+        // For tenant users, use tenant name as default company name
+        if (tenantId && !isSuper) {
+          const { data: tenant } = await supabase
+            .from('tenants')
+            .select('name')
+            .eq('id', tenantId)
+            .single()
+          
+          setCompanySettings({
+            name: tenant?.name || 'Company Name',
+            address: '',
+            phone: '',
+            email: '',
+            website: '',
+            businessHours: 'Open ⋅ Closes 7 pm',
+            openingTime: '09:00',
+            closingTime: '19:00',
+            gstNumber: '',
+            panNumber: '',
+            registrationNumber: ''
+          })
+        } else {
+          // Default for super admin or no tenant
+          setProfileSettings({
+            name: 'Raghav Sukhadia',
+            email: 'raghav@sunkool.in'
+          })
+          setCompanySettings({
+            name: 'RS Car Accessories',
+            address: '510, Western Palace, opposite Park, Congress Nagar, Nagpur, Maharashtra 440012',
+            phone: '081491 11110',
+            email: '',
+            website: '',
+            businessHours: 'Open ⋅ Closes 7 pm',
+            openingTime: '09:00',
+            closingTime: '19:00',
+            gstNumber: '',
+            panNumber: '',
+            registrationNumber: ''
+          })
+        }
       }
     } catch (error) {
       console.error('Error fetching system settings:', error)
@@ -637,26 +1317,169 @@ export default function SettingsPage() {
   const saveCompanySettings = async () => {
     setSaving(true)
     try {
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      // Update tenant name if it changed
+      if (tenantId && !isSuper) {
+        const { error: tenantUpdateError } = await supabase
+          .from('tenants')
+          .update({ name: companySettings.name })
+          .eq('id', tenantId)
+        
+        if (tenantUpdateError) {
+          console.error('Error updating tenant name:', tenantUpdateError)
+        }
+      }
+      
       const settings = [
-        { setting_key: 'company_name', setting_value: companySettings.name, setting_group: 'company' },
-        { setting_key: 'company_address', setting_value: companySettings.address, setting_group: 'company' },
-        { setting_key: 'company_phone', setting_value: companySettings.phone, setting_group: 'company' },
-        { setting_key: 'company_email', setting_value: companySettings.email || '', setting_group: 'company' },
-        { setting_key: 'company_website', setting_value: companySettings.website || '', setting_group: 'company' },
-        { setting_key: 'company_business_hours', setting_value: companySettings.businessHours || '', setting_group: 'company' },
-        { setting_key: 'company_opening_time', setting_value: companySettings.openingTime || '', setting_group: 'company' },
-        { setting_key: 'company_closing_time', setting_value: companySettings.closingTime || '', setting_group: 'company' },
-        { setting_key: 'company_gst_number', setting_value: companySettings.gstNumber || '', setting_group: 'company' },
-        { setting_key: 'company_pan_number', setting_value: companySettings.panNumber || '', setting_group: 'company' },
-        { setting_key: 'company_registration_number', setting_value: companySettings.registrationNumber || '', setting_group: 'company' }
+        { 
+          setting_key: 'company_name', 
+          setting_value: companySettings.name, 
+          setting_group: 'company',
+          tenant_id: tenantId || null
+        },
+        { 
+          setting_key: 'company_address', 
+          setting_value: companySettings.address, 
+          setting_group: 'company',
+          tenant_id: tenantId || null
+        },
+        { 
+          setting_key: 'company_phone', 
+          setting_value: companySettings.phone, 
+          setting_group: 'company',
+          tenant_id: tenantId || null
+        },
+        { 
+          setting_key: 'company_email', 
+          setting_value: companySettings.email || '', 
+          setting_group: 'company',
+          tenant_id: tenantId || null
+        },
+        { 
+          setting_key: 'company_website', 
+          setting_value: companySettings.website || '', 
+          setting_group: 'company',
+          tenant_id: tenantId || null
+        },
+        { 
+          setting_key: 'company_business_hours', 
+          setting_value: companySettings.businessHours || '', 
+          setting_group: 'company',
+          tenant_id: tenantId || null
+        },
+        { 
+          setting_key: 'company_opening_time', 
+          setting_value: companySettings.openingTime || '', 
+          setting_group: 'company',
+          tenant_id: tenantId || null
+        },
+        { 
+          setting_key: 'company_closing_time', 
+          setting_value: companySettings.closingTime || '', 
+          setting_group: 'company',
+          tenant_id: tenantId || null
+        },
+        { 
+          setting_key: 'company_gst_number', 
+          setting_value: companySettings.gstNumber || '', 
+          setting_group: 'company',
+          tenant_id: tenantId || null
+        },
+        { 
+          setting_key: 'company_pan_number', 
+          setting_value: companySettings.panNumber || '', 
+          setting_group: 'company',
+          tenant_id: tenantId || null
+        },
+        { 
+          setting_key: 'company_registration_number', 
+          setting_value: companySettings.registrationNumber || '', 
+          setting_group: 'company',
+          tenant_id: tenantId || null
+        }
       ]
 
       for (const setting of settings) {
-        const { error } = await supabase
-          .from('system_settings')
-          .upsert(setting, { onConflict: 'setting_key' })
+        // CRITICAL: Always filter by tenant_id to ensure data isolation
+        // For tenant users, tenantId must be set and not null
+        if (!tenantId && !isSuper) {
+          console.error('Cannot save settings: tenantId is required for tenant users')
+          throw new Error('Tenant ID is required to save settings')
+        }
         
-        if (error) throw error
+        // Check if setting exists for this specific tenant
+        let query = supabase
+          .from('system_settings')
+          .select('id, tenant_id')
+          .eq('setting_key', setting.setting_key)
+          .eq('setting_group', setting.setting_group)
+        
+        // CRITICAL: Always filter by tenant_id for tenant users
+        if (tenantId && !isSuper) {
+          query = query.eq('tenant_id', tenantId)
+        } else if (isSuper) {
+          // Super admin can have global settings (null tenant_id)
+          query = query.is('tenant_id', null)
+        } else {
+          // This should not happen, but handle it
+          throw new Error('Invalid tenant context')
+        }
+        
+        const { data: existing, error: queryError } = await query.maybeSingle()
+        
+        if (queryError) {
+          console.error('Error checking existing setting:', queryError)
+          throw queryError
+        }
+        
+        if (existing) {
+          // Update existing setting - CRITICAL: Verify tenant_id matches
+          if (tenantId && !isSuper && existing.tenant_id !== tenantId) {
+            console.error('Security violation: Attempted to update setting from different tenant', {
+              existingTenantId: existing.tenant_id,
+              currentTenantId: tenantId
+            })
+            throw new Error('Cannot update settings from another tenant')
+          }
+          
+          // Update with explicit tenant_id filter for security
+          let updateQuery = supabase
+            .from('system_settings')
+            .update({
+              setting_value: setting.setting_value,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', existing.id)
+          
+          // Add tenant_id filter for extra security
+          if (tenantId && !isSuper) {
+            updateQuery = updateQuery.eq('tenant_id', tenantId)
+          }
+          
+          const { error: updateError } = await updateQuery
+          
+          if (updateError) {
+            console.error('Error updating setting:', updateError)
+            throw updateError
+          }
+        } else {
+          // Insert new setting - ensure tenant_id is set
+          const insertData = {
+            ...setting,
+            tenant_id: (tenantId && !isSuper) ? tenantId : null
+          }
+          
+          const { error: insertError } = await supabase
+            .from('system_settings')
+            .insert(insertData)
+          
+          if (insertError) {
+            console.error('Error inserting setting:', insertError, insertData)
+            throw insertError
+          }
+        }
       }
 
       alert('Company settings saved successfully! Changes will be reflected across the application.')
@@ -689,6 +1512,9 @@ export default function SettingsPage() {
     if (!confirm(`Are you sure you want to delete this ${type}?`)) return
     
     try {
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
       let table: string
       const isProfile = (type === 'installer' || type === 'manager' || type === 'accountant' || type === 'coordinator')
       if (isProfile) {
@@ -705,8 +1531,40 @@ export default function SettingsPage() {
         else if (type === 'vehicle_type') table = 'vehicle_types'
         else if (type === 'department') table = 'departments'
         else table = 'locations'
-        const { error } = await supabase.from(table).delete().eq('id', id)
-        if (error) throw error
+        
+        // CRITICAL: Verify tenant_id before deleting for security
+        if (!isSuper && tenantId) {
+          // First verify this item belongs to current tenant
+          const { data: existing, error: checkError } = await supabase
+            .from(table)
+            .select('tenant_id')
+            .eq('id', id)
+            .single()
+          
+          if (checkError) throw checkError
+          
+          if (existing.tenant_id !== tenantId) {
+            alert('Cannot delete item from another tenant')
+            return
+          }
+          
+          // Delete with tenant_id filter for extra security
+          const { error } = await supabase
+            .from(table)
+            .delete()
+            .eq('id', id)
+            .eq('tenant_id', tenantId) // Extra security filter
+          
+          if (error) throw error
+        } else {
+          // Super admin delete
+          const { error } = await supabase
+            .from(table)
+            .delete()
+            .eq('id', id)
+          
+          if (error) throw error
+        }
       }
 
       // Refresh data
@@ -737,6 +1595,9 @@ export default function SettingsPage() {
 
   const handleToggleStatus = async (id: string, type: string) => {
     try {
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
       let table: string
       let currentItem: any
       
@@ -765,8 +1626,39 @@ export default function SettingsPage() {
 
       const newStatus = currentItem.status === 'active' ? 'inactive' : 'active'
       
-      const { error } = await supabase.from(table).update({ status: newStatus }).eq('id', id)
-      if (error) throw error
+      // CRITICAL: For non-profile tables, verify tenant_id before updating
+      if (table !== 'profiles' && !isSuper && tenantId) {
+        // First verify this item belongs to current tenant
+        const { data: existing, error: checkError } = await supabase
+          .from(table)
+          .select('tenant_id')
+          .eq('id', id)
+          .single()
+        
+        if (checkError) throw checkError
+        
+        if (existing.tenant_id !== tenantId) {
+          alert('Cannot update status of item from another tenant')
+          return
+        }
+        
+        // Update with tenant_id filter for extra security
+        const { error } = await supabase
+          .from(table)
+          .update({ status: newStatus })
+          .eq('id', id)
+          .eq('tenant_id', tenantId) // Extra security filter
+        
+        if (error) throw error
+      } else {
+        // For profiles or super admin, update without tenant filter
+        const { error } = await supabase
+          .from(table)
+          .update({ status: newStatus })
+          .eq('id', id)
+        
+        if (error) throw error
+      }
 
       // Refresh data
       if (type === 'installer') await fetchInstallers()
@@ -800,20 +1692,106 @@ export default function SettingsPage() {
     }
 
     try {
+      let tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      // CRITICAL: If tenant_id is missing, fetch it from user's tenant_users relationship
+      if (!isSuper && !tenantId) {
+        console.warn('⚠️ tenant_id not found in sessionStorage, fetching from database...')
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data: tenantUser } = await supabase
+            .from('tenant_users')
+            .select('tenant_id')
+            .eq('user_id', user.id)
+            .single()
+          
+          if (tenantUser?.tenant_id) {
+            tenantId = tenantUser.tenant_id
+            sessionStorage.setItem('current_tenant_id', tenantId)
+            console.log('✅ tenant_id fetched and set:', tenantId)
+          } else {
+            alert('Cannot save vehicle type: Tenant ID is required. Please log out and log in again.')
+            return
+          }
+        } else {
+          alert('Cannot save vehicle type: Please log in again.')
+          return
+        }
+      }
+      
+      // CRITICAL: Final validation - tenant_id MUST be set for tenant users
+      if (!isSuper && !tenantId) {
+        alert('Cannot save vehicle type: Tenant ID is required. Please log out and log in again.')
+        return
+      }
+      
+      console.log('💾 Creating/updating vehicle type:', {
+        name: vehicleTypeForm.name,
+        status: vehicleTypeForm.status,
+        tenantId,
+        isSuper,
+        editingVehicleType: editingVehicleType?.id
+      })
+      
       if (editingVehicleType) {
-        // Update existing
-        const { error } = await supabase
-          .from('vehicle_types')
-          .update({ name: vehicleTypeForm.name, status: vehicleTypeForm.status })
-          .eq('id', editingVehicleType.id)
+        // Update existing - verify tenant_id matches for security
+        if (!isSuper && tenantId) {
+          // First verify this vehicle type belongs to current tenant
+          const { data: existing, error: checkError } = await supabase
+            .from('vehicle_types')
+            .select('tenant_id')
+            .eq('id', editingVehicleType.id)
+            .single()
+          
+          if (checkError) throw checkError
+          
+          if (existing.tenant_id !== tenantId) {
+            alert('Cannot update vehicle type from another tenant')
+            return
+          }
+          
+          // Update with tenant_id filter for extra security
+          const { error } = await supabase
+            .from('vehicle_types')
+            .update({ name: vehicleTypeForm.name, status: vehicleTypeForm.status })
+            .eq('id', editingVehicleType.id)
+            .eq('tenant_id', tenantId) // Extra security filter
         
-        if (error) throw error
+          if (error) throw error
+        } else {
+          // Super admin update
+          const { error } = await supabase
+            .from('vehicle_types')
+            .update({ name: vehicleTypeForm.name, status: vehicleTypeForm.status })
+            .eq('id', editingVehicleType.id)
+          
+          if (error) throw error
+        }
+        
         alert('Vehicle type updated successfully!')
       } else {
-        // Create new
-        const { error } = await supabase
+        // Create new - CRITICAL: Include tenant_id
+        const insertData: any = {
+          name: vehicleTypeForm.name,
+          status: vehicleTypeForm.status
+        }
+        
+        // Add tenant_id for tenant users (super admin can have null tenant_id)
+        if (!isSuper && tenantId) {
+          insertData.tenant_id = tenantId
+        }
+        
+        console.log('📤 INSERTING vehicle_type with data:', JSON.stringify(insertData, null, 2))
+        
+        const { data: insertedData, error } = await supabase
           .from('vehicle_types')
-          .insert([{ name: vehicleTypeForm.name, status: vehicleTypeForm.status }])
+          .insert([insertData])
+          .select('id, name, tenant_id')
+        
+        if (insertedData) {
+          console.log('✅ INSERTED vehicle_type:', JSON.stringify(insertedData[0], null, 2))
+        }
         
         if (error) throw error
         alert('Vehicle type created successfully!')
@@ -836,20 +1814,116 @@ export default function SettingsPage() {
     }
 
     try {
+      let tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      // CRITICAL: If tenant_id is missing, fetch it from user's tenant_users relationship
+      if (!isSuper && !tenantId) {
+        console.warn('⚠️ tenant_id not found in sessionStorage, fetching from database...')
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data: tenantUser } = await supabase
+            .from('tenant_users')
+            .select('tenant_id')
+            .eq('user_id', user.id)
+            .single()
+          
+          if (tenantUser?.tenant_id) {
+            tenantId = tenantUser.tenant_id
+            sessionStorage.setItem('current_tenant_id', tenantId)
+            console.log('✅ tenant_id fetched and set:', tenantId)
+          } else {
+            alert('Cannot save department: Tenant ID is required. Please log out and log in again.')
+            return
+          }
+        } else {
+          alert('Cannot save department: Please log in again.')
+          return
+        }
+      }
+      
+      // CRITICAL: Final validation - tenant_id MUST be set for tenant users
+      if (!isSuper && !tenantId) {
+        alert('Cannot save department: Tenant ID is required. Please log out and log in again.')
+        return
+      }
+      
+      console.log('💾 Creating/updating department:', {
+        name: departmentForm.name,
+        status: departmentForm.status,
+        color: departmentForm.color,
+        tenantId,
+        isSuper,
+        editingDepartment: editingDepartment?.id
+      })
+      
       if (editingDepartment) {
-        // Update existing
-        const { error } = await supabase
-          .from('departments')
-          .update({ name: departmentForm.name, status: departmentForm.status, color: departmentForm.color })
-          .eq('id', editingDepartment.id)
+        // Update existing - verify tenant_id matches for security
+        if (!isSuper && tenantId) {
+          // First verify this department belongs to current tenant
+          const { data: existing, error: checkError } = await supabase
+            .from('departments')
+            .select('tenant_id')
+            .eq('id', editingDepartment.id)
+            .single()
+          
+          if (checkError) throw checkError
+          
+          if (existing.tenant_id !== tenantId) {
+            alert('Cannot update department from another tenant')
+            return
+          }
+          
+          // Update with tenant_id filter for extra security
+          const { error } = await supabase
+            .from('departments')
+            .update({ 
+              name: departmentForm.name, 
+              status: departmentForm.status, 
+              color: departmentForm.color 
+            })
+            .eq('id', editingDepartment.id)
+            .eq('tenant_id', tenantId) // Extra security filter
         
-        if (error) throw error
+          if (error) throw error
+        } else {
+          // Super admin update
+          const { error } = await supabase
+            .from('departments')
+            .update({ 
+              name: departmentForm.name, 
+              status: departmentForm.status, 
+              color: departmentForm.color 
+            })
+            .eq('id', editingDepartment.id)
+          
+          if (error) throw error
+        }
+        
         alert('Department updated successfully!')
       } else {
-        // Create new
-        const { error } = await supabase
+        // Create new - CRITICAL: Include tenant_id
+        const insertData: any = {
+          name: departmentForm.name,
+          status: departmentForm.status,
+          color: departmentForm.color
+        }
+        
+        // Add tenant_id for tenant users (super admin can have null tenant_id)
+        if (!isSuper && tenantId) {
+          insertData.tenant_id = tenantId
+        }
+        
+        console.log('📤 INSERTING department with data:', JSON.stringify(insertData, null, 2))
+        
+        const { data: insertedData, error } = await supabase
           .from('departments')
-          .insert([{ name: departmentForm.name, status: departmentForm.status, color: departmentForm.color }])
+          .insert([insertData])
+          .select('id, name, tenant_id')
+        
+        if (insertedData) {
+          console.log('✅ INSERTED department:', JSON.stringify(insertedData[0], null, 2))
+        }
         
         if (error) throw error
         alert('Department created successfully!')
@@ -872,28 +1946,116 @@ export default function SettingsPage() {
     }
 
     try {
+      let tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      // CRITICAL: If tenant_id is missing, fetch it from user's tenant_users relationship
+      if (!isSuper && !tenantId) {
+        console.warn('⚠️ tenant_id not found in sessionStorage, fetching from database...')
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data: tenantUser } = await supabase
+            .from('tenant_users')
+            .select('tenant_id')
+            .eq('user_id', user.id)
+            .single()
+          
+          if (tenantUser?.tenant_id) {
+            tenantId = tenantUser.tenant_id
+            sessionStorage.setItem('current_tenant_id', tenantId)
+            console.log('✅ tenant_id fetched and set:', tenantId)
+          } else {
+            alert('Cannot save location: Tenant ID is required. Please log out and log in again.')
+            return
+          }
+        } else {
+          alert('Cannot save location: Please log in again.')
+          return
+        }
+      }
+      
+      // CRITICAL: Final validation - tenant_id MUST be set for tenant users
+      if (!isSuper && !tenantId) {
+        alert('Cannot save location: Tenant ID is required. Please log out and log in again.')
+        return
+      }
+      
+      console.log('💾 Creating/updating location:', {
+        name: locationForm.name,
+        address: locationForm.address,
+        status: locationForm.status,
+        tenantId,
+        isSuper,
+        editingLocation: editingLocation?.id
+      })
+      
       if (editingLocation) {
-        // Update existing
-        const { error } = await supabase
-          .from('locations')
-          .update({ 
-            name: locationForm.name, 
-            address: locationForm.address,
-            status: locationForm.status 
-          })
-          .eq('id', editingLocation.id)
+        // Update existing - verify tenant_id matches for security
+        if (!isSuper && tenantId) {
+          // First verify this location belongs to current tenant
+          const { data: existing, error: checkError } = await supabase
+            .from('locations')
+            .select('tenant_id')
+            .eq('id', editingLocation.id)
+            .single()
+          
+          if (checkError) throw checkError
+          
+          if (existing.tenant_id !== tenantId) {
+            alert('Cannot update location from another tenant')
+            return
+          }
+          
+          // Update with tenant_id filter for extra security
+          const { error } = await supabase
+            .from('locations')
+            .update({ 
+              name: locationForm.name, 
+              address: locationForm.address,
+              status: locationForm.status 
+            })
+            .eq('id', editingLocation.id)
+            .eq('tenant_id', tenantId) // Extra security filter
         
-        if (error) throw error
+          if (error) throw error
+        } else {
+          // Super admin update
+          const { error } = await supabase
+            .from('locations')
+            .update({ 
+              name: locationForm.name, 
+              address: locationForm.address,
+              status: locationForm.status 
+            })
+            .eq('id', editingLocation.id)
+          
+          if (error) throw error
+        }
+        
         alert('Location updated successfully!')
       } else {
-        // Create new
-        const { error } = await supabase
+        // Create new - CRITICAL: Include tenant_id
+        const insertData: any = {
+          name: locationForm.name,
+          address: locationForm.address,
+          status: locationForm.status
+        }
+        
+        // Add tenant_id for tenant users (super admin can have null tenant_id)
+        if (!isSuper && tenantId) {
+          insertData.tenant_id = tenantId
+        }
+        
+        console.log('📤 INSERTING location with data:', JSON.stringify(insertData, null, 2))
+        
+        const { data: insertedData, error } = await supabase
           .from('locations')
-          .insert([{ 
-            name: locationForm.name, 
-            address: locationForm.address,
-            status: locationForm.status 
-          }])
+          .insert([insertData])
+          .select('id, name, tenant_id')
+        
+        if (insertedData) {
+          console.log('✅ INSERTED location:', JSON.stringify(insertedData[0], null, 2))
+        }
         
         if (error) throw error
         alert('Location created successfully!')
@@ -3553,8 +4715,471 @@ export default function SettingsPage() {
             </div>
           )}
 
+          {/* Payment Tab - Only for Admins */}
+          {activeTab === 'payment' && userRole === 'admin' && (
+            <div>
+              <div style={{ marginBottom: '1.5rem' }}>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: '600', color: '#1e293b', margin: '0 0 0.5rem 0' }}>
+                  Payment & Subscription
+                </h3>
+                <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>
+                  Request account activation and submit payment proof to continue using the service
+                </p>
+              </div>
+
+              {/* Account Status & Trial Information */}
+              <div style={{ backgroundColor: 'white', borderRadius: '0.5rem', padding: '1.5rem', border: '1px solid #e2e8f0', marginBottom: '1.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+                  <div>
+                    <h4 style={{ fontSize: '1rem', fontWeight: '600', color: '#1e293b', marginBottom: '0.5rem' }}>
+                      Account Status
+                    </h4>
+                    <div style={{ fontSize: '0.875rem', color: '#64748b' }}>
+                      {subscriptionStatus === 'trial' && trialEndsAt && new Date(trialEndsAt) > new Date() ? (
+                        <span style={{ color: '#f59e0b', fontWeight: '500' }}>⏱️ Trial Period Active</span>
+                      ) : subscriptionStatus === 'active' && (subscription?.status === 'active' || paymentProofs.some(p => p.status === 'approved')) ? (
+                        <span style={{ color: '#059669', fontWeight: '500' }}>✓ Active</span>
+                      ) : (
+                        <span style={{ color: '#dc2626', fontWeight: '500' }}>⚠ Inactive - Payment Required</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Trial Period Countdown - Show prominently for trial accounts */}
+                {subscriptionStatus === 'trial' && trialEndsAt && (
+                  <div style={{
+                    backgroundColor: '#fef3c7',
+                    border: '1px solid #fcd34d',
+                    borderRadius: '0.5rem',
+                    padding: '1rem',
+                    marginBottom: '1rem'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                      <Clock style={{ width: '1.25rem', height: '1.25rem', color: '#f59e0b' }} />
+                      <h4 style={{ fontSize: '1rem', fontWeight: '600', color: '#92400e', margin: 0 }}>
+                        {timeRemaining?.expired ? 'Trial Period Expired' : '24-Hour Trial Period'}
+                      </h4>
+                    </div>
+                    {timeRemaining && !timeRemaining.expired && (
+                      <div style={{ marginBottom: '0.75rem' }}>
+                        <div style={{ fontSize: '0.875rem', color: '#92400e', marginBottom: '0.25rem' }}>
+                          Time Remaining:
+                        </div>
+                        <div style={{ 
+                          fontSize: '1.5rem', 
+                          fontWeight: '700', 
+                          color: '#f59e0b',
+                          fontFamily: 'monospace'
+                        }}>
+                          {timeRemaining.days > 0 ? `${timeRemaining.days}d ` : ''}
+                          {timeRemaining.hours}h {timeRemaining.minutes}m {timeRemaining.seconds}s
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: '#92400e', marginTop: '0.25rem' }}>
+                          Trial expires on: {trialEndsAt ? new Date(trialEndsAt).toLocaleString() : 'N/A'}
+                        </div>
+                      </div>
+                    )}
+                    {timeRemaining?.expired && (
+                      <div style={{ fontSize: '0.875rem', color: '#dc2626', fontWeight: '500' }}>
+                        ⚠️ Your trial period has expired. Please submit payment proof to continue using the service.
+                      </div>
+                    )}
+                    {!timeRemaining?.expired && (
+                      <div style={{ 
+                        fontSize: '0.875rem', 
+                        color: '#92400e',
+                        padding: '0.75rem',
+                        backgroundColor: 'white',
+                        borderRadius: '0.375rem',
+                        marginTop: '0.75rem'
+                      }}>
+                        <strong>📋 Next Steps:</strong>
+                        <ul style={{ margin: '0.5rem 0 0 1.25rem', padding: 0 }}>
+                          <li>Submit payment proof before trial expires to avoid service interruption</li>
+                          <li>Payment amount: ₹12,000 per year (₹1,000 per month)</li>
+                          <li>Once payment is approved, your account will be active for 365 days</li>
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {activationRequestStatus && (
+                  <div style={{
+                    padding: '0.75rem',
+                    backgroundColor: '#fef3c7',
+                    border: '1px solid #fcd34d',
+                    borderRadius: '0.375rem',
+                    fontSize: '0.875rem',
+                    color: '#92400e'
+                  }}>
+                    Your activation request is pending review. Super admin will review and activate your account after payment verification.
+                  </div>
+                )}
+
+                {/* Subscription Details - Show when payment is approved or subscription exists */}
+                {(() => {
+                  // Check if there's an approved payment proof
+                  const hasApprovedProof = paymentProofs.some(p => p.status === 'approved')
+                  const approvedProof = paymentProofs.find(p => p.status === 'approved')
+                  
+                  // Show if: (subscription exists and is active) OR (has approved payment proof)
+                  const shouldShow = (subscription && subscription.status === 'active') || hasApprovedProof
+                  
+                  if (!shouldShow) return null
+                  
+                  // Use subscription data if available, otherwise calculate from approved payment proof
+                  let subscriptionData = subscription
+                  if (!subscriptionData && approvedProof) {
+                    // Calculate subscription dates from approved payment proof
+                    const paymentDate = approvedProof.payment_date 
+                      ? new Date(approvedProof.payment_date)
+                      : new Date(approvedProof.created_at)
+                    const startDate = new Date(paymentDate)
+                    startDate.setHours(0, 0, 0, 0)
+                    const endDate = new Date(startDate)
+                    endDate.setDate(endDate.getDate() + 365)
+                    endDate.setHours(23, 59, 59, 999)
+                    
+                    subscriptionData = {
+                      status: 'active',
+                      amount: approvedProof.amount || 12000,
+                      currency: approvedProof.currency || 'INR',
+                      billing_period_start: startDate.toISOString(),
+                      billing_period_end: endDate.toISOString()
+                    }
+                  }
+                  
+                  if (!subscriptionData) return null
+                  
+                  return (
+                  <div style={{ marginTop: '1rem', padding: '1.25rem', backgroundColor: '#f0fdf4', borderRadius: '0.5rem', border: '1px solid #86efac' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                      <CheckCircle style={{ width: '1.25rem', height: '1.25rem', color: '#059669' }} />
+                      <div style={{ fontSize: '1rem', fontWeight: '600', color: '#166534' }}>
+                        Payment Approved ✓
+                      </div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', fontSize: '0.875rem' }}>
+                      <div>
+                        <div style={{ color: '#6b7280', fontSize: '0.75rem', marginBottom: '0.25rem' }}>Subscription Plan</div>
+                        <div style={{ fontWeight: '600', color: '#1f2937' }}>Annual Plan</div>
+                      </div>
+                      <div>
+                        <div style={{ color: '#6b7280', fontSize: '0.75rem', marginBottom: '0.25rem' }}>Amount</div>
+                        <div style={{ fontWeight: '600', color: '#059669' }}>
+                          {subscriptionData.currency === 'INR' ? '₹' : '$'}{subscriptionData.amount.toLocaleString('en-IN')}/year
+                        </div>
+                      </div>
+                      {subscriptionData.billing_period_start && (
+                        <div>
+                          <div style={{ color: '#6b7280', fontSize: '0.75rem', marginBottom: '0.25rem' }}>Start Date</div>
+                          <div style={{ fontWeight: '500', color: '#1f2937' }}>
+                            {new Date(subscriptionData.billing_period_start).toLocaleDateString()}
+                          </div>
+                        </div>
+                      )}
+                      {subscriptionData.billing_period_end && (
+                        <div>
+                          <div style={{ color: '#6b7280', fontSize: '0.75rem', marginBottom: '0.25rem' }}>Expiry Date</div>
+                          <div style={{ fontWeight: '600', color: '#dc2626', fontSize: '1rem' }}>
+                            {new Date(subscriptionData.billing_period_end).toLocaleDateString()}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    {subscriptionData.billing_period_end && (
+                      <div style={{ marginTop: '1rem', padding: '0.75rem', backgroundColor: 'white', borderRadius: '0.375rem', border: '1px solid #86efac' }}>
+                        <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>Days Remaining</div>
+                        {(() => {
+                          const endDate = new Date(subscriptionData.billing_period_end)
+                          const now = new Date()
+                          const daysLeft = Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+                          return (
+                            <div style={{ 
+                              fontSize: '1.125rem', 
+                              fontWeight: '700',
+                              color: daysLeft < 0 ? '#dc2626' : daysLeft <= 30 ? '#f59e0b' : '#059669'
+                            }}>
+                              {daysLeft < 0 ? `Expired ${Math.abs(daysLeft)} days ago` : `${daysLeft} days`}
+                            </div>
+                          )
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                  )
+                })()}
+              </div>
+
+              {/* Payment Guidance Section */}
+              {subscriptionStatus === 'trial' && (
+                <div style={{ backgroundColor: '#eff6ff', borderRadius: '0.5rem', padding: '1.5rem', border: '1px solid #bfdbfe', marginBottom: '1.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                    <HelpCircle style={{ width: '1.25rem', height: '1.25rem', color: '#2563eb' }} />
+                    <h4 style={{ fontSize: '1rem', fontWeight: '600', color: '#1e40af', margin: 0 }}>
+                      How to Submit Payment Proof
+                    </h4>
+                  </div>
+                  <div style={{ fontSize: '0.875rem', color: '#1e40af', lineHeight: '1.6' }}>
+                    <p style={{ marginBottom: '0.75rem', fontWeight: '500' }}>
+                      To activate your account after the trial period, please follow these steps:
+                    </p>
+                    <ol style={{ marginLeft: '1.5rem', marginBottom: '0.75rem' }}>
+                      <li style={{ marginBottom: '0.5rem' }}>
+                        <strong>Make Payment:</strong> Transfer ₹12,000 to the account details provided by support (contact support for payment information)
+                      </li>
+                      <li style={{ marginBottom: '0.5rem' }}>
+                        <strong>Collect Proof:</strong> Take a screenshot or download your bank transaction receipt/statement showing the payment
+                      </li>
+                      <li style={{ marginBottom: '0.5rem' }}>
+                        <strong>Submit Below:</strong> Upload the payment proof (image or PDF), enter your transaction ID, and submit
+                      </li>
+                      <li style={{ marginBottom: '0.5rem' }}>
+                        <strong>Wait for Approval:</strong> Super admin will review your payment proof within 24-48 hours
+                      </li>
+                      <li>
+                        <strong>Account Activated:</strong> Once approved, your account will be active for 365 days from the payment date
+                      </li>
+                    </ol>
+                    <div style={{ 
+                      padding: '0.75rem', 
+                      backgroundColor: 'white', 
+                      borderRadius: '0.375rem',
+                      border: '1px solid #bfdbfe',
+                      marginTop: '0.75rem'
+                    }}>
+                      <strong>💡 Need Payment Details?</strong>
+                      <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.8125rem' }}>
+                        Contact our support team using the "Subscription Support" section below to get bank account details and payment instructions.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Payment Proof Form */}
+              <div style={{ backgroundColor: 'white', borderRadius: '0.5rem', padding: '1.5rem', border: '1px solid #e2e8f0', marginBottom: '1.5rem' }}>
+                <div style={{ marginBottom: '1rem' }}>
+                  <h4 style={{ fontSize: '1rem', fontWeight: '600', color: '#1e293b', marginBottom: '0.5rem' }}>
+                    Submit Payment Proof
+                  </h4>
+                  <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>
+                    Upload your payment receipt or bank statement to activate your account. Accepted formats: JPG, PNG, PDF (Max 10MB)
+                  </p>
+                </div>
+                <form onSubmit={handlePaymentProofSubmit}>
+                  <div style={{ display: 'grid', gap: '1rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '500', color: '#374151', marginBottom: '0.5rem' }}>
+                        Payment Proof (Image/PDF) *
+                      </label>
+                      <input
+                        type="file"
+                        accept="image/*,.pdf"
+                        onChange={(e) => setPaymentForm({ ...paymentForm, file: e.target.files?.[0] || null })}
+                        required
+                        style={{
+                          width: '100%',
+                          padding: '0.5rem',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '0.375rem',
+                          fontSize: '0.875rem'
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '500', color: '#374151', marginBottom: '0.5rem' }}>
+                        Transaction ID / Reference Number *
+                      </label>
+                      <input
+                        type="text"
+                        value={paymentForm.transactionId}
+                        onChange={(e) => setPaymentForm({ ...paymentForm, transactionId: e.target.value })}
+                        placeholder="Enter transaction ID or reference number"
+                        required
+                        style={{
+                          width: '100%',
+                          padding: '0.75rem',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '0.375rem',
+                          fontSize: '0.875rem'
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '500', color: '#374151', marginBottom: '0.5rem' }}>
+                        Payment Date *
+                      </label>
+                      <input
+                        type="date"
+                        value={paymentForm.paymentDate}
+                        onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })}
+                        required
+                        style={{
+                          width: '100%',
+                          padding: '0.75rem',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '0.375rem',
+                          fontSize: '0.875rem'
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '500', color: '#374151', marginBottom: '0.5rem' }}>
+                        Notes (Optional)
+                      </label>
+                      <textarea
+                        value={paymentForm.notes}
+                        onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
+                        placeholder="Any additional information..."
+                        rows={3}
+                        style={{
+                          width: '100%',
+                          padding: '0.75rem',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '0.375rem',
+                          fontSize: '0.875rem',
+                          resize: 'vertical'
+                        }}
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={uploadingProof || !paymentForm.file}
+                      style={{
+                        padding: '0.75rem 1.5rem',
+                        backgroundColor: (uploadingProof || !paymentForm.file) ? '#9ca3af' : '#059669',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '0.375rem',
+                        fontSize: '0.875rem',
+                        fontWeight: '600',
+                        cursor: (uploadingProof || !paymentForm.file) ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem'
+                      }}
+                    >
+                      <Save style={{ width: '1rem', height: '1rem' }} />
+                      {uploadingProof ? 'Submitting...' : 'Submit Payment Proof'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Payment Proof History */}
+              {paymentProofs.length > 0 && (
+                <div style={{ backgroundColor: 'white', borderRadius: '0.5rem', padding: '1.5rem', border: '1px solid #e2e8f0', marginBottom: '1.5rem' }}>
+                  <h4 style={{ fontSize: '1rem', fontWeight: '600', color: '#1e293b', marginBottom: '1rem' }}>
+                    Payment Proof History
+                  </h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {paymentProofs.map((proof) => (
+                      <div
+                        key={proof.id}
+                        style={{
+                          padding: '1rem',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '0.375rem',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: '0.875rem', fontWeight: '500', color: '#1e293b', marginBottom: '0.25rem' }}>
+                            Transaction: {proof.transaction_id || 'N/A'}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                            Submitted: {new Date(proof.created_at).toLocaleString()}
+                          </div>
+                        </div>
+                        <div>
+                          <span style={{
+                            padding: '0.25rem 0.75rem',
+                            borderRadius: '9999px',
+                            fontSize: '0.75rem',
+                            fontWeight: '500',
+                            backgroundColor: proof.status === 'approved' ? '#dcfce7' : proof.status === 'rejected' ? '#fef2f2' : '#fef3c7',
+                            color: proof.status === 'approved' ? '#166534' : proof.status === 'rejected' ? '#dc2626' : '#92400e'
+                          }}>
+                            {proof.status === 'approved' ? 'Approved' : proof.status === 'rejected' ? 'Rejected' : 'Pending'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Support Section */}
+              <div style={{ backgroundColor: 'white', borderRadius: '0.5rem', padding: '1.5rem', border: '1px solid #e2e8f0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                  <HelpCircle style={{ width: '1.25rem', height: '1.25rem', color: '#2563eb' }} />
+                  <h4 style={{ fontSize: '1rem', fontWeight: '600', color: '#1e293b', margin: 0 }}>
+                    Subscription Support
+                  </h4>
+                </div>
+                <p style={{ fontSize: '0.875rem', color: '#64748b', marginBottom: '1rem' }}>
+                  Need help with your subscription or payment? Contact our support team:
+                </p>
+                {loadingSupport ? (
+                  <div style={{ padding: '1rem', textAlign: 'center', color: '#64748b' }}>Loading support contacts...</div>
+                ) : supportEmails.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {supportEmails.map((email, index) => (
+                      <a
+                        key={index}
+                        href={`mailto:${email}?subject=Subscription Support Request&body=Hello,%0D%0A%0D%0AI need assistance with my subscription.%0D%0A%0D%0AThank you.`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.75rem',
+                          padding: '0.75rem 1rem',
+                          backgroundColor: '#eff6ff',
+                          border: '1px solid #bfdbfe',
+                          borderRadius: '0.375rem',
+                          textDecoration: 'none',
+                          color: '#1e40af',
+                          fontSize: '0.875rem',
+                          fontWeight: '500',
+                          transition: 'all 0.2s',
+                          cursor: 'pointer'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = '#dbeafe'
+                          e.currentTarget.style.borderColor = '#93c5fd'
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = '#eff6ff'
+                          e.currentTarget.style.borderColor = '#bfdbfe'
+                        }}
+                      >
+                        <Mail style={{ width: '1rem', height: '1rem' }} />
+                        <span>{email}</span>
+                      </a>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{
+                    padding: '1rem',
+                    backgroundColor: '#fef3c7',
+                    border: '1px solid #fcd34d',
+                    borderRadius: '0.375rem',
+                    fontSize: '0.875rem',
+                    color: '#92400e'
+                  }}>
+                    Support contacts are not available. Please contact your system administrator.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Other tabs - placeholder */}
-          {activeTab !== 'management' && activeTab !== 'profile' && activeTab !== 'company' && activeTab !== 'notifications' && (
+          {activeTab !== 'management' && activeTab !== 'profile' && activeTab !== 'company' && activeTab !== 'notifications' && activeTab !== 'payment' && (
             <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>
               {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} settings coming soon...
             </div>

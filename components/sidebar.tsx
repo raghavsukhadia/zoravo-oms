@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { LayoutDashboard, Car, Truck, Activity, DollarSign, Settings, Users } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import Logo from '@/components/Logo'
+import { getCurrentTenantId } from '@/lib/tenant-context'
 
 interface SidebarProps {
   userRole: UserRole
@@ -27,11 +28,13 @@ export default function Sidebar({ userRole }: SidebarProps) {
   const pathname = usePathname()
   const [companyName, setCompanyName] = useState('R S Cars • Nagpur')
   const [companyLocation, setCompanyLocation] = useState('Nagpur')
+  const [isSubscriptionExpired, setIsSubscriptionExpired] = useState(false)
   const supabase = createClient()
   const [isMobile, setIsMobile] = useState(false)
 
   useEffect(() => {
     loadCompanySettings()
+    checkSubscriptionStatus()
     const onResize = () => setIsMobile(window.innerWidth <= 640)
     onResize()
     window.addEventListener('resize', onResize)
@@ -62,35 +65,110 @@ export default function Sidebar({ userRole }: SidebarProps) {
     }
   }, [])
 
+  const checkSubscriptionStatus = async () => {
+    try {
+      const tenantId = getCurrentTenantId()
+      if (!tenantId) return
+
+      const { data: tenantData } = await supabase
+        .from('tenants')
+        .select(`
+          is_active,
+          subscriptions(billing_period_end)
+        `)
+        .eq('id', tenantId)
+        .single()
+
+      if (tenantData?.subscriptions?.[0]?.billing_period_end) {
+        const endDate = new Date(tenantData.subscriptions[0].billing_period_end)
+        const now = new Date()
+        setIsSubscriptionExpired(endDate < now)
+      } else {
+        // No subscription: 
+        // - If tenant is active, treat as active (legacy tenant or manually activated)
+        // - If tenant is inactive, treat as expired
+        setIsSubscriptionExpired(!tenantData?.is_active)
+      }
+    } catch (error) {
+      console.error('Error checking subscription status:', error)
+    }
+  }
+
   const loadCompanySettings = async () => {
     try {
-      // Load company name and location from system_settings
-      const { data } = await supabase
-        .from('system_settings')
-        .select('setting_key, setting_value')
-        .in('setting_key', ['company_name', 'company_address'])
-        .in('setting_group', ['company'])
+      const tenantId = getCurrentTenantId()
       
-      if (data) {
-        const nameSetting = data.find(s => s.setting_key === 'company_name')
-        const addressSetting = data.find(s => s.setting_key === 'company_address')
+      // If no tenant ID, try to load from system_settings (fallback for default tenant)
+      if (!tenantId) {
+        const { data } = await supabase
+          .from('system_settings')
+          .select('setting_key, setting_value')
+          .in('setting_key', ['company_name', 'company_address'])
+          .in('setting_group', ['company'])
         
-        if (nameSetting?.setting_value) {
-          setCompanyName(nameSetting.setting_value)
-          localStorage.setItem('companyName', nameSetting.setting_value)
+        if (data) {
+          const nameSetting = data.find(s => s.setting_key === 'company_name')
+          const addressSetting = data.find(s => s.setting_key === 'company_address')
+          
+          if (nameSetting?.setting_value) {
+            setCompanyName(nameSetting.setting_value)
+            localStorage.setItem('companyName', nameSetting.setting_value)
+          }
+          
+          if (addressSetting?.setting_value) {
+            const address = addressSetting.setting_value
+            const parts = address.split(',')
+            if (parts.length >= 2) {
+              const city = parts[parts.length - 2].trim()
+              if (city) {
+                setCompanyLocation(city)
+              }
+            }
+          }
         }
+        return
+      }
+      
+      // Load tenant-specific company name from tenants table
+      const { data: tenant, error } = await supabase
+        .from('tenants')
+        .select('name, workspace_url')
+        .eq('id', tenantId)
+        .single()
+      
+      if (error) {
+        console.error('Error loading tenant:', error)
+        return
+      }
+      
+      if (tenant) {
+        // Set company name from tenant name - remove city suffix if present
+        // If tenant name has "•" separator, use only the part before it
+        const nameParts = tenant.name.split('•')
+        const companyNameOnly = nameParts[0].trim()
+        setCompanyName(companyNameOnly)
+        localStorage.setItem('companyName', companyNameOnly)
         
-        // Extract location from address if available
-        if (addressSetting?.setting_value) {
-          const address = addressSetting.setting_value
-          // Try to extract city/location from address (look for city before state)
-          // Match pattern like "..., Nagpur, Maharashtra"
-          const parts = address.split(',')
-          if (parts.length >= 2) {
-            // Usually city is second to last (before state/pincode)
-            const city = parts[parts.length - 2].trim()
-            if (city) {
-              setCompanyLocation(city)
+        // Extract city from tenant name if present (e.g., "RS Car Accessories • Nagpur")
+        if (nameParts.length > 1) {
+          setCompanyLocation(nameParts[nameParts.length - 1].trim())
+        } else {
+          // Fallback: try to get from system_settings for this tenant
+          const { data: settings } = await supabase
+            .from('system_settings')
+            .select('setting_key, setting_value')
+            .in('setting_key', ['company_address'])
+            .eq('setting_group', 'company')
+            .eq('tenant_id', tenantId)
+          
+          if (settings && settings.length > 0) {
+            const address = settings[0].setting_value
+            const parts = address.split(',')
+            if (parts.length >= 2) {
+              const city = parts[parts.length - 2].trim()
+              if (city) {
+                setCompanyLocation(city)
+              }
             }
           }
         }
@@ -118,30 +196,63 @@ export default function Sidebar({ userRole }: SidebarProps) {
         borderBottom: '1px solid rgba(255,255,255,0.1)',
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.5rem'
+        gap: '0.75rem'
       }}>
+        {/* Logo Icon */}
         <div style={{ 
           display: 'flex', 
           alignItems: 'center', 
           justifyContent: isMobile ? 'center' : 'flex-start' 
         }}>
-          {isMobile ? (
-            <Logo size="small" showText={false} variant="light" />
-          ) : (
-            <Logo size="medium" showText={true} variant="light" />
-          )}
+          <Logo size="medium" showText={false} variant="light" />
         </div>
+        
         {!isMobile && (
-          <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>
-            {companyName}
-            {companyLocation && companyName !== companyLocation && !companyName.includes(companyLocation) && ` • ${companyLocation}`}
-          </div>
+          <>
+            {/* ZORAVO | OMS Text */}
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '0.5rem',
+              fontSize: '0.875rem',
+              fontWeight: '600',
+              color: 'rgba(255,255,255,0.9)',
+              letterSpacing: '0.05em',
+              textTransform: 'uppercase'
+            }}>
+              <span>ZORAVO</span>
+              <div style={{
+                width: '2px',
+                height: '1rem',
+                backgroundColor: '#06b6d4',
+                flexShrink: 0
+              }} />
+              <span style={{ fontWeight: '500' }}>OMS</span>
+            </div>
+            
+            {/* Company Name - Only show company name, no city */}
+            <div style={{ 
+              fontSize: '0.75rem', 
+              color: 'rgba(255,255,255,0.6)',
+              lineHeight: '1.4'
+            }}>
+              {companyName}
+            </div>
+          </>
         )}
       </div>
 
       {/* Navigation */}
       <nav style={{ flex: 1, padding: isMobile ? '0.25rem' : '0.5rem', overflow: 'auto' }}>
-        {navigationItems.map((item) => {
+        {navigationItems
+          .filter(item => {
+            // When subscription expired, only show Settings and About
+            if (isSubscriptionExpired) {
+              return item.href === '/settings' || item.href === '/about'
+            }
+            return true
+          })
+          .map((item) => {
           const isActive = pathname === item.href || 
                           (item.href !== '/dashboard' && pathname.startsWith(item.href))
           const Icon = iconMap[item.title] || LayoutDashboard

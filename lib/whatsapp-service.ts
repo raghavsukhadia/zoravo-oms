@@ -69,12 +69,22 @@ class WhatsAppService {
   /**
    * Load configuration from database
    */
-  async loadConfig(supabase: any): Promise<WhatsAppConfig | null> {
+  async loadConfig(supabase: any, tenantId?: string | null): Promise<WhatsAppConfig | null> {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('system_settings')
         .select('*')
         .eq('setting_group', 'whatsapp_notifications')
+      
+      // Add tenant filter if tenantId is provided
+      if (tenantId) {
+        query = query.eq('tenant_id', tenantId)
+      } else {
+        // If no tenant, load global settings (null tenant_id)
+        query = query.is('tenant_id', null)
+      }
+      
+      const { data, error } = await query
       
       if (error) throw error
       

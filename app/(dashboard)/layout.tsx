@@ -1,24 +1,48 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { usePathname, useSearchParams } from 'next/navigation'
 import Sidebar from '@/components/sidebar'
 import Topbar from '@/components/topbar'
+import SubscriptionGuard from '@/components/SubscriptionGuard'
 import { createClient } from '@/lib/supabase/client'
 import { checkUserRole, type UserRole } from '@/lib/rbac'
+import { getWorkspaceUrl, initializeTenantFromWorkspace } from '@/lib/workspace-detector'
 
 interface DashboardLayoutProps {
   children: React.ReactNode
 }
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const [userRole, setUserRole] = useState<UserRole>('admin')
   const [userName, setUserName] = useState('Demo Admin')
   const [userEmail, setUserEmail] = useState('raghav@sunkool.in')
   const [loading, setLoading] = useState(true)
   const supabase = createClient()
 
+  // Check if this is an admin route - if so, skip tenant layout
+  const isAdminRoute = pathname?.startsWith('/admin')
+
   useEffect(() => {
-    loadUserData()
+    // Skip loading user data for admin routes - admin layout handles it
+    if (isAdminRoute) {
+      setLoading(false)
+      return
+    }
+
+    // Initialize tenant context from workspace URL (subdomain or query param)
+    const initializeTenant = async () => {
+      const workspaceUrl = getWorkspaceUrl()
+      if (workspaceUrl) {
+        await initializeTenantFromWorkspace(workspaceUrl)
+      }
+    }
+    
+    initializeTenant().then(() => {
+      loadUserData()
+    })
     
     // Set up real-time subscription for profile changes
     const channel = supabase
@@ -40,7 +64,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [])
+  }, [isAdminRoute, searchParams])
 
   const loadUserData = async () => {
     try {
@@ -70,21 +94,29 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     }
   }
 
+  // For admin routes, just render children - admin layout handles everything
+  if (isAdminRoute) {
+    return <>{children}</>
+  }
+
+  // For regular tenant routes, render with sidebar and topbar wrapped in SubscriptionGuard
   return (
-    <div style={{ display: 'flex', height: '100vh', backgroundColor: '#f8fafc' }}>
-      <Sidebar userRole={userRole} />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {!loading && (
-          <Topbar 
-            userRole={userRole}
-            userName={userName}
-            userEmail={userEmail}
-          />
-        )}
-        <main style={{ flex: 1, overflow: 'auto', padding: '1.5rem' }}>
-          {children}
-        </main>
+    <SubscriptionGuard>
+      <div style={{ display: 'flex', height: '100vh', backgroundColor: '#f8fafc' }}>
+        <Sidebar userRole={userRole} />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {!loading && (
+            <Topbar 
+              userRole={userRole}
+              userName={userName}
+              userEmail={userEmail}
+            />
+          )}
+          <main style={{ flex: 1, overflow: 'auto', padding: '1.5rem' }}>
+            {children}
+          </main>
+        </div>
       </div>
-    </div>
+    </SubscriptionGuard>
   )
 }

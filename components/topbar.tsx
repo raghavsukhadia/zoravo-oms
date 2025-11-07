@@ -5,6 +5,7 @@ import { UserRole } from '@/lib/rbac'
 import { Search, Bell, LogOut, User, Check, CheckCheck, X } from 'lucide-react'
 import { notificationsService, type Notification } from '@/lib/notifications-service'
 import { createClient } from '@/lib/supabase/client'
+import { getCurrentTenantId } from '@/lib/tenant-context'
 
 interface TopbarProps {
   userRole: UserRole
@@ -18,10 +19,12 @@ export default function Topbar({ userRole, userName, userEmail }: TopbarProps) {
   const [showNotifications, setShowNotifications] = useState(false)
   const [currentUserName, setCurrentUserName] = useState(userName)
   const [currentUserEmail, setCurrentUserEmail] = useState(userEmail)
+  const [tenantCode, setTenantCode] = useState<string | null>(null)
   const supabase = createClient()
 
   useEffect(() => {
     loadUserInfo()
+    loadTenantCode()
     // loadNotifications() // DISABLED FOR NOW
     
     // Set up real-time subscription for notifications - DISABLED FOR NOW
@@ -80,6 +83,25 @@ export default function Topbar({ userRole, userName, userEmail }: TopbarProps) {
       }
     } catch (error) {
       console.error('Error loading user info:', error)
+    }
+  }
+
+  const loadTenantCode = async () => {
+    try {
+      const tenantId = getCurrentTenantId()
+      if (tenantId) {
+        const { data: tenant } = await supabase
+          .from('tenants')
+          .select('tenant_code')
+          .eq('id', tenantId)
+          .single()
+        
+        if (tenant?.tenant_code) {
+          setTenantCode(tenant.tenant_code)
+        }
+      }
+    } catch (error) {
+      console.error('Error loading tenant code:', error)
     }
   }
 
@@ -350,6 +372,39 @@ export default function Topbar({ userRole, userName, userEmail }: TopbarProps) {
             </div>
           )
         })()}
+
+        {/* Tenant ID - Displayed separately and prominently */}
+        {tenantCode && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            padding: '0.5rem 1rem',
+            backgroundColor: '#eff6ff',
+            border: '1px solid #3b82f6',
+            borderRadius: '0.5rem',
+            marginRight: '0.5rem'
+          }}>
+            <div style={{
+              fontSize: '0.7rem',
+              fontWeight: '600',
+              color: '#6b7280',
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em'
+            }}>
+              Tenant ID:
+            </div>
+            <div style={{
+              fontFamily: 'monospace',
+              fontSize: '0.875rem',
+              fontWeight: '700',
+              color: '#2563eb',
+              letterSpacing: '0.1em'
+            }}>
+              {tenantCode}
+            </div>
+          </div>
+        )}
 
         {/* User Profile */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.5rem', paddingRight: '1.5rem', borderRadius: '0.5rem', backgroundColor: '#f9fafb' }}>

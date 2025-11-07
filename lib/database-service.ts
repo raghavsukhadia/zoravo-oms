@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/client'
+import { getCurrentTenantId, isSuperAdmin } from '@/lib/tenant-context'
 
 export interface Customer {
   id: string
@@ -147,51 +148,83 @@ export interface DashboardKPIs {
 class DatabaseService {
   private supabase = createClient()
 
+  // Helper method to add tenant filter to queries
+  private addTenantFilter(query: any, tenantId: string | null, isSuper: boolean = false) {
+    if (isSuper || !tenantId) {
+      return query
+    }
+    return query.eq('tenant_id', tenantId)
+  }
+
+  // Get current tenant ID
+  private getTenantId(): string | null {
+    return getCurrentTenantId()
+  }
+
+  // Check if super admin
+  private checkIsSuperAdmin(): boolean {
+    return isSuperAdmin()
+  }
+
   // Dashboard KPIs
   async getDashboardKPIs(): Promise<DashboardKPIs> {
     try {
+      const tenantId = this.getTenantId()
+      const isSuper = this.checkIsSuperAdmin()
       const today = new Date().toISOString().split('T')[0]
       const thisMonth = new Date().toISOString().substring(0, 7)
       const lastMonth = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().substring(0, 7)
 
       // Get vehicles in workshop
-      const { data: vehiclesInWorkshop } = await this.supabase
+      let vehiclesQuery = this.supabase
         .from('vehicles')
         .select('id')
         .eq('status', 'in_workshop')
+      vehiclesQuery = this.addTenantFilter(vehiclesQuery, tenantId, isSuper)
+      const { data: vehiclesInWorkshop } = await vehiclesQuery
 
       // Get jobs in progress
-      const { data: jobsInProgress } = await this.supabase
+      let jobsQuery = this.supabase
         .from('work_orders')
         .select('id')
         .eq('status', 'in_progress')
+      jobsQuery = this.addTenantFilter(jobsQuery, tenantId, isSuper)
+      const { data: jobsInProgress } = await jobsQuery
 
       // Get today's intakes
-      const { data: todaysIntakes } = await this.supabase
+      let intakesQuery = this.supabase
         .from('vehicles')
         .select('id')
         .gte('created_at', `${today}T00:00:00`)
         .lte('created_at', `${today}T23:59:59`)
+      intakesQuery = this.addTenantFilter(intakesQuery, tenantId, isSuper)
+      const { data: todaysIntakes } = await intakesQuery
 
       // Get unpaid invoices
-      const { data: unpaidInvoices } = await this.supabase
+      let unpaidQuery = this.supabase
         .from('invoices')
         .select('id')
         .eq('status', 'pending')
+      unpaidQuery = this.addTenantFilter(unpaidQuery, tenantId, isSuper)
+      const { data: unpaidInvoices } = await unpaidQuery
 
       // Get overdue payments
-      const { data: overduePayments } = await this.supabase
+      let overdueQuery = this.supabase
         .from('invoices')
         .select('id')
         .eq('status', 'overdue')
+      overdueQuery = this.addTenantFilter(overdueQuery, tenantId, isSuper)
+      const { data: overduePayments } = await overdueQuery
 
       // Get monthly revenue
-      const { data: monthlyRevenue } = await this.supabase
+      let revenueQuery = this.supabase
         .from('invoices')
         .select('total_amount')
         .eq('status', 'paid')
         .gte('paid_date', `${thisMonth}-01`)
         .lte('paid_date', `${thisMonth}-31`)
+      revenueQuery = this.addTenantFilter(revenueQuery, tenantId, isSuper)
+      const { data: monthlyRevenue } = await revenueQuery
 
       // Calculate changes (simplified - in real app, you'd compare with previous periods)
       const vehiclesInWorkshopChange = 2
@@ -226,13 +259,19 @@ class DatabaseService {
   // Vehicles
   async getVehicles(): Promise<Vehicle[]> {
     try {
-      const { data, error } = await this.supabase
+      const tenantId = this.getTenantId()
+      const isSuper = this.checkIsSuperAdmin()
+      
+      let query = this.supabase
         .from('vehicles')
         .select(`
           *,
           customer:customers(*)
         `)
         .order('created_at', { ascending: false })
+      
+      query = this.addTenantFilter(query, tenantId, isSuper)
+      const { data, error } = await query
 
       if (error) throw error
       return data || []
@@ -244,14 +283,19 @@ class DatabaseService {
 
   async getVehicleById(id: string): Promise<Vehicle | null> {
     try {
-      const { data, error } = await this.supabase
+      const tenantId = this.getTenantId()
+      const isSuper = this.checkIsSuperAdmin()
+      
+      let query = this.supabase
         .from('vehicles')
         .select(`
           *,
           customer:customers(*)
         `)
         .eq('id', id)
-        .single()
+      
+      query = this.addTenantFilter(query, tenantId, isSuper)
+      const { data, error } = await query.single()
 
       if (error) throw error
       return data
@@ -263,9 +307,17 @@ class DatabaseService {
 
   async createVehicle(vehicle: Partial<Vehicle>): Promise<Vehicle> {
     try {
+      const tenantId = this.getTenantId()
+      
+      // Ensure tenant_id is set when creating
+      const vehicleWithTenant = {
+        ...vehicle,
+        tenant_id: tenantId || vehicle.tenant_id
+      }
+      
       const { data, error } = await this.supabase
         .from('vehicles')
-        .insert(vehicle)
+        .insert(vehicleWithTenant)
         .select(`
           *,
           customer:customers(*)
@@ -282,15 +334,19 @@ class DatabaseService {
 
   async updateVehicle(id: string, updates: Partial<Vehicle>): Promise<Vehicle> {
     try {
-      const { data, error } = await this.supabase
+      const tenantId = this.getTenantId()
+      const isSuper = this.checkIsSuperAdmin()
+      
+      let query = this.supabase
         .from('vehicles')
         .update(updates)
         .eq('id', id)
-        .select(`
+      
+      query = this.addTenantFilter(query, tenantId, isSuper)
+      const { data, error } = await query.select(`
           *,
           customer:customers(*)
-        `)
-        .single()
+        `).single()
 
       if (error) throw error
       return data
@@ -303,13 +359,19 @@ class DatabaseService {
   // Work Orders
   async getWorkOrders(): Promise<WorkOrder[]> {
     try {
-      const { data, error } = await this.supabase
+      const tenantId = this.getTenantId()
+      const isSuper = this.checkIsSuperAdmin()
+      
+      let query = this.supabase
         .from('work_orders')
         .select(`
           *,
           vehicle:vehicles(*)
         `)
         .order('created_at', { ascending: false })
+      
+      query = this.addTenantFilter(query, tenantId, isSuper)
+      const { data, error } = await query
 
       if (error) throw error
       return data || []
@@ -321,7 +383,10 @@ class DatabaseService {
 
   async getWorkOrdersByVehicle(vehicleId: string): Promise<WorkOrder[]> {
     try {
-      const { data, error } = await this.supabase
+      const tenantId = this.getTenantId()
+      const isSuper = this.checkIsSuperAdmin()
+      
+      let query = this.supabase
         .from('work_orders')
         .select(`
           *,
@@ -329,6 +394,9 @@ class DatabaseService {
         `)
         .eq('vehicle_id', vehicleId)
         .order('created_at', { ascending: false })
+      
+      query = this.addTenantFilter(query, tenantId, isSuper)
+      const { data, error } = await query
 
       if (error) throw error
       return data || []
@@ -341,11 +409,17 @@ class DatabaseService {
   // Invoices
   async getInvoices(): Promise<Invoice[]> {
     try {
+      const tenantId = this.getTenantId()
+      const isSuper = this.checkIsSuperAdmin()
+      
       // First, get invoices without joins
-      const { data: invoices, error: invoicesError } = await this.supabase
+      let invoicesQuery = this.supabase
         .from('invoices')
         .select('*')
         .order('created_at', { ascending: false })
+      
+      invoicesQuery = this.addTenantFilter(invoicesQuery, tenantId, isSuper)
+      const { data: invoices, error: invoicesError } = await invoicesQuery
 
       if (invoicesError) throw invoicesError
 
@@ -355,10 +429,13 @@ class DatabaseService {
       const vehicleIds = invoices.map(inv => inv.vehicle_id).filter(Boolean)
       
       if (vehicleIds.length > 0) {
-        const { data: vehicles } = await this.supabase
+        let vehiclesQuery = this.supabase
           .from('vehicles')
           .select('*, customer:customers(*)')
           .in('id', vehicleIds)
+        
+        vehiclesQuery = this.addTenantFilter(vehiclesQuery, tenantId, isSuper)
+        const { data: vehicles } = await vehiclesQuery
 
         // Map vehicles to invoices
         const vehiclesMap = new Map(vehicles?.map(v => [v.id, v]) || [])
@@ -378,23 +455,31 @@ class DatabaseService {
 
   async getInvoicesByVehicle(vehicleId: string): Promise<Invoice[]> {
     try {
+      const tenantId = this.getTenantId()
+      const isSuper = this.checkIsSuperAdmin()
+      
       // Get invoices and fetch vehicle separately
-      const { data: invoices, error: invoicesError } = await this.supabase
+      let invoicesQuery = this.supabase
         .from('invoices')
         .select('*')
         .eq('vehicle_id', vehicleId)
         .order('created_at', { ascending: false })
+      
+      invoicesQuery = this.addTenantFilter(invoicesQuery, tenantId, isSuper)
+      const { data: invoices, error: invoicesError } = await invoicesQuery
 
       if (invoicesError) throw invoicesError
 
       if (!invoices || invoices.length === 0) return []
 
       // Fetch vehicle details
-      const { data: vehicle } = await this.supabase
+      let vehicleQuery = this.supabase
         .from('vehicles')
         .select('*, customer:customers(*)')
         .eq('id', vehicleId)
-        .single()
+      
+      vehicleQuery = this.addTenantFilter(vehicleQuery, tenantId, isSuper)
+      const { data: vehicle } = await vehicleQuery.single()
 
       // Map vehicle to invoices
       if (vehicle) {
@@ -413,7 +498,10 @@ class DatabaseService {
   // Service Trackers
   async getServiceTrackers(): Promise<ServiceTracker[]> {
     try {
-      const { data, error } = await this.supabase
+      const tenantId = this.getTenantId()
+      const isSuper = this.checkIsSuperAdmin()
+      
+      let query = this.supabase
         .from('service_trackers')
         .select(`
           *,
@@ -421,6 +509,9 @@ class DatabaseService {
           work_order:work_orders(*)
         `)
         .order('created_at', { ascending: false })
+      
+      query = this.addTenantFilter(query, tenantId, isSuper)
+      const { data, error } = await query
 
       if (error) throw error
       return data || []
@@ -433,7 +524,10 @@ class DatabaseService {
   // Follow-ups
   async getFollowUps(): Promise<FollowUp[]> {
     try {
-      const { data, error } = await this.supabase
+      const tenantId = this.getTenantId()
+      const isSuper = this.checkIsSuperAdmin()
+      
+      let query = this.supabase
         .from('follow_ups')
         .select(`
           *,
@@ -441,6 +535,9 @@ class DatabaseService {
           customer:customers(*)
         `)
         .order('next_call_date', { ascending: true })
+      
+      query = this.addTenantFilter(query, tenantId, isSuper)
+      const { data, error } = await query
 
       if (error) throw error
       return data || []
@@ -453,7 +550,10 @@ class DatabaseService {
   // Requirements
   async getRequirements(): Promise<Requirement[]> {
     try {
-      const { data, error } = await this.supabase
+      const tenantId = this.getTenantId()
+      const isSuper = this.checkIsSuperAdmin()
+      
+      let query = this.supabase
         .from('requirements')
         .select(`
           *,
@@ -461,6 +561,9 @@ class DatabaseService {
           vehicle:vehicles(*)
         `)
         .order('created_at', { ascending: false })
+      
+      query = this.addTenantFilter(query, tenantId, isSuper)
+      const { data, error } = await query
 
       if (error) throw error
       return data || []
@@ -473,10 +576,16 @@ class DatabaseService {
   // Customers
   async getCustomers(): Promise<Customer[]> {
     try {
-      const { data, error } = await this.supabase
+      const tenantId = this.getTenantId()
+      const isSuper = this.checkIsSuperAdmin()
+      
+      let query = this.supabase
         .from('customers')
         .select('*')
         .order('created_at', { ascending: false })
+      
+      query = this.addTenantFilter(query, tenantId, isSuper)
+      const { data, error } = await query
 
       if (error) throw error
       return data || []
@@ -488,9 +597,17 @@ class DatabaseService {
 
   async createCustomer(customer: Partial<Customer>): Promise<Customer> {
     try {
+      const tenantId = this.getTenantId()
+      
+      // Ensure tenant_id is set when creating
+      const customerWithTenant = {
+        ...customer,
+        tenant_id: tenantId || customer.tenant_id
+      }
+      
       const { data, error } = await this.supabase
         .from('customers')
-        .insert(customer)
+        .insert(customerWithTenant)
         .select()
         .single()
 
@@ -505,17 +622,23 @@ class DatabaseService {
   // Recent data for dashboard
   async getRecentVehicles(limit: number = 5): Promise<any[]> {
     try {
+      const tenantId = this.getTenantId()
+      const isSuper = this.checkIsSuperAdmin()
+      
       // Calculate 24 hours ago timestamp
       const twentyFourHoursAgo = new Date()
       twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24)
       const twentyFourHoursAgoISO = twentyFourHoursAgo.toISOString()
 
       // First try to get from vehicle_inward (more complete data)
-      const { data: inwardData, error: inwardError } = await this.supabase
+      let inwardQuery = this.supabase
         .from('vehicle_inward')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(limit * 2) // Get more to account for filtering
+      
+      inwardQuery = this.addTenantFilter(inwardQuery, tenantId, isSuper)
+      const { data: inwardData, error: inwardError } = await inwardQuery
 
       if (!inwardError && inwardData && inwardData.length > 0) {
         // Filter out vehicles that have been "installation_complete" for more than 24 hours
@@ -563,7 +686,7 @@ class DatabaseService {
       }
 
       // Fallback to vehicles table if vehicle_inward doesn't exist or has no data
-      const { data, error } = await this.supabase
+      let vehiclesQuery = this.supabase
         .from('vehicles')
         .select(`
           *,
@@ -571,6 +694,9 @@ class DatabaseService {
         `)
         .order('created_at', { ascending: false })
         .limit(limit)
+      
+      vehiclesQuery = this.addTenantFilter(vehiclesQuery, tenantId, isSuper)
+      const { data, error } = await vehiclesQuery
 
       if (error) throw error
       return data || []
@@ -582,12 +708,18 @@ class DatabaseService {
 
   async getRecentInvoices(limit: number = 5): Promise<Invoice[]> {
     try {
+      const tenantId = this.getTenantId()
+      const isSuper = this.checkIsSuperAdmin()
+      
       // 1) Fetch real invoices
-      const { data: invoices, error: invoicesError } = await this.supabase
+      let invoicesQuery = this.supabase
         .from('invoices')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(limit)
+      
+      invoicesQuery = this.addTenantFilter(invoicesQuery, tenantId, isSuper)
+      const { data: invoices, error: invoicesError } = await invoicesQuery
 
       if (invoicesError) throw invoicesError
 
@@ -595,11 +727,14 @@ class DatabaseService {
 
       // 2) Fetch ALL recent vehicle_inward entries to show in Recent Invoices tab (with prices)
       // This allows accountant to see all entries immediately after Vehicle Inward Form is filled
-      const { data: allInwardEntriesRaw } = await this.supabase
+      let inwardQuery = this.supabase
         .from('vehicle_inward')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(limit * 3)
+      
+      inwardQuery = this.addTenantFilter(inwardQuery, tenantId, isSuper)
+      const { data: allInwardEntriesRaw } = await inwardQuery
 
       // Filter out only final/delivered statuses - include all active entries (pending, in_progress, etc.)
       const finalStatuses = ['completed', 'complete_and_delivered', 'delivered', 'delivered_final', 'delivered (final)']
@@ -687,10 +822,13 @@ class DatabaseService {
       if (realInvoices.length > 0) {
         const vehicleIds = realInvoices.map(inv => inv.vehicle_id).filter(Boolean)
         if (vehicleIds.length > 0) {
-          const { data: vehicles } = await this.supabase
+          let vehiclesQuery = this.supabase
             .from('vehicles')
             .select('*, customer:customers(*)')
             .in('id', vehicleIds)
+          
+          vehiclesQuery = this.addTenantFilter(vehiclesQuery, tenantId, isSuper)
+          const { data: vehicles } = await vehiclesQuery
 
           const vehiclesMap = new Map(vehicles?.map(v => [v.id, v]) || [])
           realInvoices.forEach(invoice => {

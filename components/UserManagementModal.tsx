@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { X, Save, Loader2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { UserRole } from '@/lib/rbac'
+import { getCurrentTenantId, isSuperAdmin } from '@/lib/tenant-context'
 
 interface UserManagementModalProps {
   isOpen: boolean
@@ -64,17 +65,42 @@ export default function UserManagementModal({ isOpen, onClose, editingUser, role
     setError('')
   }, [editingUser, isOpen])
 
-  // Load departments when modal opens
+  // Load departments when modal opens - FILTER BY TENANT
   useEffect(() => {
     const loadDepartments = async () => {
       try {
-        const { data } = await supabase
+        const tenantId = getCurrentTenantId()
+        const isSuper = isSuperAdmin()
+        
+        let query = supabase
           .from('departments')
           .select('id, name')
           .eq('status', 'active')
+          .order('name', { ascending: true })
+        
+        // CRITICAL: Filter by tenant_id for data isolation
+        if (!isSuper && tenantId) {
+          query = query.eq('tenant_id', tenantId)
+        }
+        
+        const { data, error } = await query
+        
+        if (error) {
+          // Check if error is due to missing tenant_id column
+          if (error.code === '42703' && error.message?.includes('tenant_id')) {
+            console.error('❌ ERROR: tenant_id column is missing in departments table.')
+            console.error('📋 SOLUTION: Please run database/multi_tenant_schema.sql in Supabase SQL Editor.')
+          } else {
+            console.error('Error loading departments:', error)
+          }
+          setAvailableDepartments([])
+          return
+        }
+        
         setAvailableDepartments(data || [])
       } catch (e) {
-        // ignore
+        console.error('Error loading departments:', e)
+        setAvailableDepartments([])
       }
     }
     if (isOpen) loadDepartments()
@@ -120,6 +146,9 @@ export default function UserManagementModal({ isOpen, onClose, editingUser, role
   }
 
   const createUser = async () => {
+    // Get current tenant ID
+    const tenantId = getCurrentTenantId()
+    
     // Call API route to create user
     const response = await fetch('/api/users/create', {
       method: 'POST',
@@ -133,7 +162,8 @@ export default function UserManagementModal({ isOpen, onClose, editingUser, role
         phone: formData.phone,
         role: role,
         departments: formData.departments,
-        specialization: formData.specialization
+        specialization: formData.specialization,
+        tenant_id: tenantId // Link user to current tenant
       })
     })
 

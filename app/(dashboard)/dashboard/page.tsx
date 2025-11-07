@@ -9,6 +9,7 @@ import DashboardCharts from '@/components/dashboard-charts'
 import VehicleDetailsModal from '@/components/VehicleDetailsModal'
 import { createClient } from '@/lib/supabase/client'
 import { notificationWorkflow } from '@/lib/notification-workflow'
+import { getCurrentTenantId, isSuperAdmin } from '@/lib/tenant-context'
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState('overview')
@@ -414,22 +415,30 @@ export default function DashboardPage() {
 
   const computeAdminMetrics = async () => {
     try {
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
       const today = new Date().toISOString().split('T')[0]
       const thisMonth = new Date().toISOString().substring(0, 7)
 
+      // Helper function to add tenant filter
+      const addTenantFilter = (query: any) => {
+        if (isSuper || !tenantId) return query
+        return query.eq('tenant_id', tenantId)
+      }
+
       const [totalVehiclesRes, jobsInProgressRes, todaysIntakesRes, recentInvoicesRes, monthlyRevenueRes, completedAllRes, installCompleteRes, installCompleteAltRes, pendingRes, paidThisMonthRes, overdueRes] = await Promise.all([
-        supabase.from('vehicle_inward').select('id', { count: 'exact', head: true }),
-        supabase.from('vehicle_inward').select('id', { count: 'exact', head: true }).in('status', ['in_progress', 'under_installation']),
-        supabase.from('vehicle_inward').select('id', { count: 'exact', head: true }).gte('created_at', `${today}T00:00:00`).lte('created_at', `${today}T23:59:59`),
-        supabase.from('invoices').select('id', { count: 'exact', head: true }),
-        supabase.from('invoices').select('total_amount').eq('status', 'paid').gte('paid_date', `${thisMonth}-01`).lte('paid_date', `${thisMonth}-31`),
+        addTenantFilter(supabase.from('vehicle_inward').select('id', { count: 'exact', head: true })),
+        addTenantFilter(supabase.from('vehicle_inward').select('id', { count: 'exact', head: true }).in('status', ['in_progress', 'under_installation'])),
+        addTenantFilter(supabase.from('vehicle_inward').select('id', { count: 'exact', head: true }).gte('created_at', `${today}T00:00:00`).lte('created_at', `${today}T23:59:59`)),
+        addTenantFilter(supabase.from('invoices').select('id', { count: 'exact', head: true })),
+        addTenantFilter(supabase.from('invoices').select('total_amount').eq('status', 'paid').gte('paid_date', `${thisMonth}-01`).lte('paid_date', `${thisMonth}-31`)),
         // Fetch all completed-like entries; we'll filter to current month in JS to avoid column-name mismatches
-        supabase.from('vehicle_inward').select('final_amount,total_amount,discount_amount,accessories_requested,updated_at,created_at,status').in('status', ['completed','complete_and_delivered']),
-        supabase.from('vehicle_inward').select('id', { count: 'exact', head: true }).in('status', ['installation_complete']),
-        supabase.from('vehicle_inward').select('id', { count: 'exact', head: true }).in('status', ['installation complete']),
-        supabase.from('invoices').select('total_amount').eq('status','pending'),
-        supabase.from('invoices').select('total_amount').eq('status','paid').gte('paid_date', `${thisMonth}-01`).lte('paid_date', `${thisMonth}-31`),
-        supabase.from('invoices').select('total_amount').eq('status','overdue')
+        addTenantFilter(supabase.from('vehicle_inward').select('final_amount,total_amount,discount_amount,accessories_requested,updated_at,created_at,status').in('status', ['completed','complete_and_delivered'])),
+        addTenantFilter(supabase.from('vehicle_inward').select('id', { count: 'exact', head: true }).in('status', ['installation_complete'])),
+        addTenantFilter(supabase.from('vehicle_inward').select('id', { count: 'exact', head: true }).in('status', ['installation complete'])),
+        addTenantFilter(supabase.from('invoices').select('total_amount').eq('status','pending')),
+        addTenantFilter(supabase.from('invoices').select('total_amount').eq('status','paid').gte('paid_date', `${thisMonth}-01`).lte('paid_date', `${thisMonth}-31`)),
+        addTenantFilter(supabase.from('invoices').select('total_amount').eq('status','overdue'))
       ])
 
       let monthlyRevenue = (monthlyRevenueRes.data || []).reduce((s: number, r: any) => s + (r.total_amount || 0), 0)

@@ -8,6 +8,7 @@ import VehicleDetailsModal from './components/VehicleDetailsModal'
 import JobSheetPrint from '@/components/JobSheetPrint'
 import { notificationWorkflow } from '@/lib/notification-workflow'
 import { checkUserRole, type UserRole } from '@/lib/rbac'
+import { getCurrentTenantId, isSuperAdmin } from '@/lib/tenant-context'
 
 export default function VehiclesPage() {
   const [searchTerm, setSearchTerm] = useState('')
@@ -39,10 +40,20 @@ export default function VehiclesPage() {
 
   const fetchVehicles = async () => {
     try {
-      const { data, error } = await supabase
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      let query = supabase
         .from('vehicle_inward')
         .select('*')
         .order('created_at', { ascending: false })
+      
+      // Add tenant filter
+      if (!isSuper && tenantId) {
+        query = query.eq('tenant_id', tenantId)
+      }
+      
+      const { data, error } = await query
 
       if (error) {
         console.error('Error fetching vehicles:', error)
@@ -179,16 +190,25 @@ export default function VehiclesPage() {
       }
 
       // Update vehicle inward status in database
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
       console.log('Updating vehicle inward status:', { vehicleId, newStatus })
       
-      const { data, error } = await supabase
+      let updateQuery = supabase
         .from('vehicle_inward')
         .update({ 
           status: newStatus,
           updated_at: new Date().toISOString()
         })
         .eq('id', vehicleId)
-        .select()
+      
+      // Add tenant filter for security
+      if (!isSuper && tenantId) {
+        updateQuery = updateQuery.eq('tenant_id', tenantId)
+      }
+      
+      const { data, error } = await updateQuery.select()
 
       console.log('Update result:', { data, error })
 
@@ -236,11 +256,21 @@ export default function VehiclesPage() {
   const handleDeleteVehicle = async (vehicleId: string, regNo: string) => {
     if (confirm(`Are you sure you want to delete this vehicle inward record? This action cannot be undone.`)) {
       try {
+        const tenantId = getCurrentTenantId()
+        const isSuper = isSuperAdmin()
+        
         // Delete from vehicle_inward table using ID
-        const { error } = await supabase
+        let deleteQuery = supabase
           .from('vehicle_inward')
           .delete()
           .eq('id', vehicleId)
+        
+        // Add tenant filter for security
+        if (!isSuper && tenantId) {
+          deleteQuery = deleteQuery.eq('tenant_id', tenantId)
+        }
+        
+        const { error } = await deleteQuery
 
         if (error) {
           console.error('Supabase error:', error)

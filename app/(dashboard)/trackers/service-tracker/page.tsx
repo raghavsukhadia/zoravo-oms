@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { Car, Search, Eye, MessageSquare, Calendar, CheckCircle, AlertCircle, Plus, Edit, Trash2, X, Upload, Send, ChevronLeft, FileText } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { getCurrentTenantId, isSuperAdmin } from '@/lib/tenant-context'
 
 export default function ServiceTrackerPage() {
   const [services, setServices] = useState<any[]>([])
@@ -42,13 +43,38 @@ export default function ServiceTrackerPage() {
 
   const fetchServices = async () => {
     try {
-      const { data, error } = await supabase
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      let query = supabase
         .from('service_tracker')
         .select('*')
         .order('scheduled_date', { ascending: false })
+      
+      // Add tenant filter
+      if (!isSuper && tenantId) {
+        query = query.eq('tenant_id', tenantId)
+      }
+      
+      const { data, error } = await query
 
       if (error) {
-        console.error('Error fetching services:', error)
+        // Check if error is due to missing tenant_id column (PostgreSQL error code 42703 = undefined_column)
+        if (error.code === '42703' && error.message?.includes('tenant_id')) {
+          console.error('❌ ERROR: tenant_id column is missing in service_tracker table.')
+          console.error('📋 SOLUTION: Please run this SQL migration in Supabase SQL Editor:')
+          console.error('   File: database/add_tenant_id_to_service_tracker.sql')
+          console.error('   This will add the tenant_id column and enable multi-tenant data isolation.')
+          alert('Database migration required: Please run database/add_tenant_id_to_service_tracker.sql in Supabase SQL Editor to add tenant_id column to service_tracker table.')
+        } else {
+          // More detailed error logging for other errors
+          console.error('Error fetching services:', {
+            message: error.message,
+            details: error.details,
+            hint: error.hint,
+            code: error.code
+          })
+        }
         setServices([])
         return
       }
@@ -123,25 +149,35 @@ export default function ServiceTrackerPage() {
       
       if (editingService) {
         // Update existing service
-        const { error, data } = await supabase
+        const tenantId = getCurrentTenantId()
+        const isSuper = isSuperAdmin()
+        
+        let updateQuery = supabase
           .from('service_tracker')
           .update({
             ...formData,
             updated_at: new Date().toISOString()
           })
           .eq('id', editingService.id)
-          .select('id')
-          .single()
+        
+        // Add tenant filter for security
+        if (!isSuper && tenantId) {
+          updateQuery = updateQuery.eq('tenant_id', tenantId)
+        }
+        
+        const { error, data } = await updateQuery.select('id').single()
 
         if (error) throw error
         serviceId = data.id
         alert('Service updated successfully!')
       } else {
         // Create new service
+        const tenantId = getCurrentTenantId()
         const { error, data } = await supabase
           .from('service_tracker')
           .insert({
-            ...formData
+            ...formData,
+            tenant_id: tenantId // Add tenant_id for data isolation
           })
           .select('id')
           .single()
@@ -184,10 +220,20 @@ export default function ServiceTrackerPage() {
     if (!confirm('Are you sure you want to delete this service job?')) return
 
     try {
-      const { error } = await supabase
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      let deleteQuery = supabase
         .from('service_tracker')
         .delete()
         .eq('id', id)
+      
+      // Add tenant filter for security
+      if (!isSuper && tenantId) {
+        deleteQuery = deleteQuery.eq('tenant_id', tenantId)
+      }
+      
+      const { error } = await deleteQuery
 
       if (error) throw error
       alert('Service deleted successfully!')
@@ -200,10 +246,20 @@ export default function ServiceTrackerPage() {
 
   const handleStatusUpdate = async (id: string, newStatus: string) => {
     try {
-      const { error } = await supabase
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      let updateQuery = supabase
         .from('service_tracker')
         .update({ status: newStatus })
         .eq('id', id)
+      
+      // Add tenant filter for security
+      if (!isSuper && tenantId) {
+        updateQuery = updateQuery.eq('tenant_id', tenantId)
+      }
+      
+      const { error } = await updateQuery
 
       if (error) throw error
       fetchServices()

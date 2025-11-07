@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { Phone, Clock, Play, X, CheckCircle, AlertCircle, Plus, Search, Filter, Edit, Trash, ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { getCurrentTenantId, isSuperAdmin } from '@/lib/tenant-context'
 
 export default function CallFollowUpPage() {
   const [calls, setCalls] = useState<any[]>([])
@@ -40,20 +41,49 @@ export default function CallFollowUpPage() {
 
   const fetchCalls = async () => {
     try {
-      const { data, error } = await supabase
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      let query = supabase
         .from('call_follow_up')
         .select('*')
         .order('created_at', { ascending: false })
+      
+      // Add tenant filter for data isolation
+      if (!isSuper && tenantId) {
+        query = query.eq('tenant_id', tenantId)
+      }
+      
+      const { data, error } = await query
 
       if (error) {
-        console.error('Error fetching calls:', error)
+        // Check if error is due to missing tenant_id column (PostgreSQL error code 42703 = undefined_column)
+        if (error.code === '42703' && error.message?.includes('tenant_id')) {
+          console.error('❌ ERROR: tenant_id column is missing in call_follow_up table.')
+          console.error('📋 SOLUTION: Please run this SQL migration in Supabase SQL Editor:')
+          console.error('   File: database/add_tenant_id_to_call_follow_up.sql')
+          console.error('   This will add the tenant_id column and enable multi-tenant data isolation.')
+          alert('Database migration required: Please run database/add_tenant_id_to_call_follow_up.sql in Supabase SQL Editor to add tenant_id column to call_follow_up table.')
+        } else {
+          // More detailed error logging for other errors
+          console.error('Error fetching calls:', {
+            message: error.message,
+            details: error.details,
+            hint: error.hint,
+            code: error.code
+          })
+        }
         setCalls([])
         return
       }
 
       setCalls(data || [])
-    } catch (error) {
-      console.error('Error fetching calls:', error)
+    } catch (error: any) {
+      // More detailed error logging for catch block
+      console.error('Error fetching calls (catch):', {
+        message: error?.message || 'Unknown error',
+        error: error
+      })
       setCalls([])
     }
   }
@@ -66,22 +96,34 @@ export default function CallFollowUpPage() {
     try {
       if (editingCall) {
         // Update existing call
-        const { error } = await supabase
+        const tenantId = getCurrentTenantId()
+        const isSuper = isSuperAdmin()
+        
+        let updateQuery = supabase
           .from('call_follow_up')
           .update({
             ...formData,
             updated_at: new Date().toISOString()
           })
           .eq('id', editingCall.id)
+        
+        // Add tenant filter for security
+        if (!isSuper && tenantId) {
+          updateQuery = updateQuery.eq('tenant_id', tenantId)
+        }
+        
+        const { error } = await updateQuery
 
         if (error) throw error
         alert('Call Follow Up updated successfully!')
       } else {
         // Create new call
+        const tenantId = getCurrentTenantId()
         const { error } = await supabase
           .from('call_follow_up')
           .insert({
-            ...formData
+            ...formData,
+            tenant_id: tenantId // Add tenant_id for data isolation
           })
 
         if (error) throw error
@@ -117,10 +159,20 @@ export default function CallFollowUpPage() {
     if (!confirm('Are you sure you want to delete this call follow up?')) return
 
     try {
-      const { error } = await supabase
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      let deleteQuery = supabase
         .from('call_follow_up')
         .delete()
         .eq('id', id)
+      
+      // Add tenant filter for security
+      if (!isSuper && tenantId) {
+        deleteQuery = deleteQuery.eq('tenant_id', tenantId)
+      }
+      
+      const { error } = await deleteQuery
 
       if (error) throw error
       alert('Call Follow Up deleted successfully!')

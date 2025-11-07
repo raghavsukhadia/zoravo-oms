@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { Plus, Search, Trash2, Edit, Upload, Send, X, Calendar, Car, FileText, CheckCircle, User, Clipboard, ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { getCurrentTenantId, isSuperAdmin } from '@/lib/tenant-context'
 
 export default function RequirementsPage() {
   const [requirements, setRequirements] = useState<any[]>([])
@@ -36,46 +37,134 @@ export default function RequirementsPage() {
 
   const fetchRequirements = async () => {
     try {
-      const { data, error } = await supabase
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      let query = supabase
         .from('customer_requirements')
         .select('*')
         .order('created_at', { ascending: false })
+      
+      // Add tenant filter
+      if (!isSuper && tenantId) {
+        query = query.eq('tenant_id', tenantId)
+      }
+      
+      const { data, error } = await query
 
-      if (error) throw error
+      if (error) {
+        // Check if error is due to missing tenant_id column (PostgreSQL error code 42703 = undefined_column)
+        if (error.code === '42703' && error.message?.includes('tenant_id')) {
+          console.error('❌ ERROR: tenant_id column is missing in customer_requirements table.')
+          console.error('📋 SOLUTION: Please run this SQL migration in Supabase SQL Editor:')
+          console.error('   File: database/add_tenant_id_to_customer_requirements.sql')
+          console.error('   This will add the tenant_id column and enable multi-tenant data isolation.')
+          alert('Database migration required: Please run database/add_tenant_id_to_customer_requirements.sql in Supabase SQL Editor to add tenant_id column to customer_requirements table.')
+        } else {
+          // More detailed error logging for other errors
+          console.error('Error fetching requirements:', {
+            message: error.message,
+            details: error.details,
+            hint: error.hint,
+            code: error.code
+          })
+        }
+        setRequirements([])
+        return
+      }
+      
       setRequirements(data || [])
-    } catch (error) {
-      console.error('Error fetching requirements:', error)
+    } catch (error: any) {
+      // More detailed error logging for catch block
+      console.error('Error fetching requirements (catch):', {
+        message: error?.message || 'Unknown error',
+        error: error
+      })
       setRequirements([])
     }
   }
 
   const fetchComments = async (requirementId: string) => {
     try {
-      const { data, error } = await supabase
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      let commentsQuery = supabase
         .from('customer_requirements_comments')
         .select('*')
         .eq('requirement_id', requirementId)
         .order('created_at', { ascending: false })
+      
+      // Add tenant filter if tenant_id column exists
+      if (!isSuper && tenantId) {
+        commentsQuery = commentsQuery.eq('tenant_id', tenantId)
+      }
+      
+      const { data, error } = await commentsQuery
 
-      if (error) throw error
+      if (error) {
+        // Ignore tenant_id column errors for now (will be fixed by migration)
+        if (error.code === '42703' && error.message?.includes('tenant_id')) {
+          // Fallback: query without tenant_id filter
+          const { data: fallbackData, error: fallbackError } = await supabase
+            .from('customer_requirements_comments')
+            .select('*')
+            .eq('requirement_id', requirementId)
+            .order('created_at', { ascending: false })
+          
+          if (fallbackError) throw fallbackError
+          setComments(fallbackData || [])
+          return
+        }
+        throw error
+      }
+      
       setComments(data || [])
       
       if (data && data.length > 0) {
         const commentIds = data.map(c => c.id)
-        const { data: attachmentsData } = await supabase
+        let attachmentsQuery = supabase
           .from('customer_requirements_comment_attachments')
           .select('*')
           .in('comment_id', commentIds)
           .order('created_at', { ascending: false })
         
-        const attachmentsMap: {[key: string]: any[]} = {}
-        attachmentsData?.forEach(att => {
-          if (!attachmentsMap[att.comment_id]) {
-            attachmentsMap[att.comment_id] = []
+        // Add tenant filter if tenant_id column exists
+        if (!isSuper && tenantId) {
+          attachmentsQuery = attachmentsQuery.eq('tenant_id', tenantId)
+        }
+        
+        const { data: attachmentsData, error: attachmentsError } = await attachmentsQuery
+        
+        // Ignore tenant_id column errors for attachments (will be fixed by migration)
+        if (attachmentsError && attachmentsError.code === '42703' && attachmentsError.message?.includes('tenant_id')) {
+          // Fallback: query without tenant_id filter
+          const { data: fallbackAttachments } = await supabase
+            .from('customer_requirements_comment_attachments')
+            .select('*')
+            .in('comment_id', commentIds)
+            .order('created_at', { ascending: false })
+          
+          if (fallbackAttachments) {
+            const attachmentsMap: {[key: string]: any[]} = {}
+            fallbackAttachments.forEach(att => {
+              if (!attachmentsMap[att.comment_id]) {
+                attachmentsMap[att.comment_id] = []
+              }
+              attachmentsMap[att.comment_id].push(att)
+            })
+            setCommentAttachmentsMap(attachmentsMap)
           }
-          attachmentsMap[att.comment_id].push(att)
-        })
-        setCommentAttachmentsMap(attachmentsMap)
+        } else if (attachmentsData) {
+          const attachmentsMap: {[key: string]: any[]} = {}
+          attachmentsData.forEach(att => {
+            if (!attachmentsMap[att.comment_id]) {
+              attachmentsMap[att.comment_id] = []
+            }
+            attachmentsMap[att.comment_id].push(att)
+          })
+          setCommentAttachmentsMap(attachmentsMap)
+        }
       }
     } catch (error) {
       console.error('Error fetching comments:', error)
@@ -93,19 +182,31 @@ export default function RequirementsPage() {
       
       if (selectedRequirement?.editing) {
         // Update existing
-        const { error, data } = await supabase
+        const tenantId = getCurrentTenantId()
+        const isSuper = isSuperAdmin()
+        
+        let updateQuery = supabase
           .from('customer_requirements')
           .update({ ...formData, updated_at: new Date().toISOString() })
           .eq('id', selectedRequirement.id)
-          .select('id')
-          .single()
+        
+        // Add tenant filter for security
+        if (!isSuper && tenantId) {
+          updateQuery = updateQuery.eq('tenant_id', tenantId)
+        }
+        
+        const { error, data } = await updateQuery.select('id').single()
         if (error) throw error
         requirementId = data.id
       } else {
         // Create new
+        const tenantId = getCurrentTenantId()
         const { error, data } = await supabase
           .from('customer_requirements')
-          .insert({ ...formData })
+          .insert({ 
+            ...formData,
+            tenant_id: tenantId // Add tenant_id for data isolation
+          })
           .select('id')
           .single()
         if (error) throw error
@@ -114,6 +215,7 @@ export default function RequirementsPage() {
 
       // Upload files if any
       if (selectedFiles.length > 0) {
+        const tenantId = getCurrentTenantId()
         for (const file of selectedFiles) {
           const fileName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`
           const filePath = `${requirementId}/${fileName}`
@@ -134,7 +236,8 @@ export default function RequirementsPage() {
               file_name: file.name,
               file_url: urlData.publicUrl,
               file_type: file.type,
-              file_size: file.size
+              file_size: file.size,
+              tenant_id: tenantId || null // Add tenant_id for data isolation
             })
         }
 
@@ -163,7 +266,20 @@ export default function RequirementsPage() {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this requirement?')) return
     try {
-      const { error } = await supabase.from('customer_requirements').delete().eq('id', id)
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      let deleteQuery = supabase
+        .from('customer_requirements')
+        .delete()
+        .eq('id', id)
+      
+      // Add tenant filter for security
+      if (!isSuper && tenantId) {
+        deleteQuery = deleteQuery.eq('tenant_id', tenantId)
+      }
+      
+      const { error } = await deleteQuery
       if (error) throw error
       fetchRequirements()
     } catch (error: any) {
@@ -173,10 +289,20 @@ export default function RequirementsPage() {
 
   const handleStatusUpdate = async (id: string, newStatus: string) => {
     try {
-      const { error } = await supabase
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      let updateQuery = supabase
         .from('customer_requirements')
         .update({ status: newStatus })
         .eq('id', id)
+      
+      // Add tenant filter for security
+      if (!isSuper && tenantId) {
+        updateQuery = updateQuery.eq('tenant_id', tenantId)
+      }
+      
+      const { error } = await updateQuery
       if (error) throw error
       fetchRequirements()
     } catch (error: any) {
@@ -198,13 +324,15 @@ export default function RequirementsPage() {
     if (!newComment.trim() && selectedCommentFiles.length === 0) return
 
     try {
+      const tenantId = getCurrentTenantId()
       const { data: commentData, error: commentError } = await supabase
         .from('customer_requirements_comments')
         .insert({
           requirement_id: selectedRequirement.id,
           comment: newComment.trim() || '(No comment text)',
           created_by: 'Demo Admin',
-          attachments_count: selectedCommentFiles.length
+          attachments_count: selectedCommentFiles.length,
+          tenant_id: tenantId || null // Add tenant_id for data isolation
         })
         .select('id')
         .single()
@@ -232,7 +360,8 @@ export default function RequirementsPage() {
               file_name: file.name,
               file_url: urlData.publicUrl,
               file_type: file.type,
-              file_size: file.size
+              file_size: file.size,
+              tenant_id: tenantId || null // Add tenant_id for data isolation
             })
         }
       }

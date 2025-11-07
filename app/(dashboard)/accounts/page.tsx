@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { DollarSign, FileText, TrendingUp, Eye, Download, Search, Calendar, User, Car, Package, MapPin, Building, AlertCircle, CheckCircle, Clock, Edit2, Save, X, Upload, Link as LinkIcon, FileImage, BarChart3, Filter, Percent, Users } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import VehicleCommentsSection from '@/components/VehicleCommentsSection'
+import { getCurrentTenantId, isSuperAdmin } from '@/lib/tenant-context'
 
 interface AccountEntry {
   id: string
@@ -205,6 +206,9 @@ export default function AccountsPage() {
   const fetchCompletedEntries = async () => {
     try {
       setCompletedLoading(true)
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
       // Fetch vehicles that are finished from operations perspective and should remain in Accounts history
       // Includes: completed, complete_and_delivered, delivered variants
       let query = supabase
@@ -212,6 +216,11 @@ export default function AccountsPage() {
         .select('*')
         .in('status', ['completed', 'complete_and_delivered', 'delivered', 'delivered_final', 'delivered (final)'])
         .order('updated_at', { ascending: false })
+      
+      // Add tenant filter
+      if (!isSuper && tenantId) {
+        query = query.eq('tenant_id', tenantId)
+      }
 
       // Apply time filter
       let startDate: Date | null = null
@@ -373,13 +382,23 @@ export default function AccountsPage() {
   const fetchAccountEntries = async () => {
     try {
       setLoading(true)
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
       // Fetch only vehicles with "installation_complete" status (pending accountant work)
       // Once marked as "completed", they are removed from the main Accounts view
-      const { data, error } = await supabase
+      let query = supabase
         .from('vehicle_inward')
         .select('*')
         .eq('status', 'installation_complete')
         .order('updated_at', { ascending: false })
+      
+      // Add tenant filter
+      if (!isSuper && tenantId) {
+        query = query.eq('tenant_id', tenantId)
+      }
+      
+      const { data, error } = await query
 
       if (error) throw error
 
@@ -654,10 +673,20 @@ export default function AccountsPage() {
       // Update accessories_requested in vehicle_inward
       const updatedProducts = JSON.stringify(editedProducts)
       
-      const { error } = await supabase
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      let updateQuery = supabase
         .from('vehicle_inward')
         .update({ accessories_requested: updatedProducts })
         .eq('id', selectedEntry.id)
+      
+      // Add tenant filter for security
+      if (!isSuper && tenantId) {
+        updateQuery = updateQuery.eq('tenant_id', tenantId)
+      }
+      
+      const { error } = await updateQuery
 
       if (error) throw error
 
@@ -783,10 +812,20 @@ export default function AccountsPage() {
 
     try {
       setUpdatingStatus(true)
-      const { error } = await supabase
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      let updateQuery = supabase
         .from('vehicle_inward')
         .update({ status: 'completed' })
         .eq('id', selectedEntry.id)
+      
+      // Add tenant filter for security
+      if (!isSuper && tenantId) {
+        updateQuery = updateQuery.eq('tenant_id', tenantId)
+      }
+      
+      const { error } = await updateQuery
 
       if (error) throw error
 
@@ -2055,11 +2094,19 @@ export default function AccountsPage() {
                                 }
                                 
                                 // Get existing notes or create new
-                                const { data: existing } = await supabase
+                                const tenantId = getCurrentTenantId()
+                                const isSuper = isSuperAdmin()
+                                
+                                let notesQuery = supabase
                                   .from('vehicle_inward')
                                   .select('notes')
                                   .eq('id', selectedEntry.id)
-                                  .single()
+                                
+                                if (!isSuper && tenantId) {
+                                  notesQuery = notesQuery.eq('tenant_id', tenantId)
+                                }
+                                
+                                const { data: existing } = await notesQuery.single()
                                 
                                 let notesData: any = {}
                                 if (existing?.notes) {
@@ -2072,10 +2119,16 @@ export default function AccountsPage() {
                                 
                                 notesData.discount = discountData
                                 
-                                const { error } = await supabase
+                                let updateNotesQuery = supabase
                                   .from('vehicle_inward')
                                   .update({ notes: JSON.stringify(notesData) })
                                   .eq('id', selectedEntry.id)
+                                
+                                if (!isSuper && tenantId) {
+                                  updateNotesQuery = updateNotesQuery.eq('tenant_id', tenantId)
+                                }
+                                
+                                const { error } = await updateNotesQuery
                                 
                                 if (error) throw error
                                 

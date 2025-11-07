@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
 
 export async function POST(request: Request) {
   try {
@@ -7,7 +8,7 @@ export async function POST(request: Request) {
 
     // Get request body
     const body = await request.json()
-    const { email, password, name, phone, role, department, departments, specialization } = body
+    const { email, password, name, phone, role, department, departments, specialization, tenant_id } = body
 
     // Validate required fields
     if (!email || !name || !phone || !role) {
@@ -103,6 +104,25 @@ export async function POST(request: Request) {
         .eq('id', authData.user.id)
 
       if (updateError) console.error('Error updating profile:', updateError)
+    }
+
+    // Create tenant_users relationship if tenant_id is provided
+    if (tenant_id) {
+      const { error: tenantUserError } = await adminSupabase
+        .from('tenant_users')
+        .insert({
+          tenant_id: tenant_id,
+          user_id: authData.user.id,
+          role: role
+        })
+
+      if (tenantUserError) {
+        console.error('Error creating tenant_users relationship:', tenantUserError)
+        // Don't fail the request - user is created, just not linked to tenant
+        console.warn('Tenant user relationship creation failed but user was created:', authData.user.id)
+      } else {
+        console.log('Tenant user relationship created successfully')
+      }
     }
 
     return NextResponse.json({

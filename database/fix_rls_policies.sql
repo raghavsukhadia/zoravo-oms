@@ -1,49 +1,75 @@
--- Fix RLS policies for profiles table to avoid infinite recursion
--- Run this in Supabase SQL Editor
+-- Fix RLS Policies to Prevent Infinite Recursion
+-- Run this script to fix the infinite recursion issue in RLS policies
 
--- Drop existing problematic policies
-DROP POLICY IF EXISTS "Admins can view all profiles" ON profiles;
-DROP POLICY IF EXISTS "Managers can view all profiles" ON profiles;
-DROP POLICY IF EXISTS "Users can view their own profile" ON profiles;
-DROP POLICY IF EXISTS "Admins can update all profiles" ON profiles;
-DROP POLICY IF EXISTS "Admins can insert profiles" ON profiles;
-DROP POLICY IF EXISTS "Allow authenticated users to insert profiles" ON profiles;
-DROP POLICY IF EXISTS "Allow authenticated users to view profiles" ON profiles;
-DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
-
--- Create simpler policies that don't cause recursion
-
--- Policy: Anyone authenticated can view any profile (for admin to see all)
-CREATE POLICY "Allow authenticated users to view profiles" ON profiles
-  FOR SELECT USING (auth.role() = 'authenticated');
-
--- Policy: Users can update their own profile
-CREATE POLICY "Users can update own profile" ON profiles
-  FOR UPDATE USING (auth.uid() = id)
-  WITH CHECK (auth.uid() = id);
-
--- Policy: Allow service role to insert profiles (for trigger and API)
-CREATE POLICY "Allow service role to insert profiles" ON profiles
-  FOR INSERT WITH CHECK (true);
-
--- Recreate the trigger function with SECURITY DEFINER to bypass RLS
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
+-- First, ensure the helper functions exist
+CREATE OR REPLACE FUNCTION get_user_tenant_ids()
+RETURNS UUID[] AS $$
+DECLARE
+    tenant_ids UUID[];
 BEGIN
-  INSERT INTO public.profiles (id, email, name, role)
-  VALUES (
-    NEW.id,
-    NEW.email,
-    COALESCE(NEW.raw_user_meta_data->>'name', NEW.email),
-    COALESCE(NEW.raw_user_meta_data->>'role', 'installer')
-  )
-  ON CONFLICT (id) DO NOTHING;
-  RETURN NEW;
+    SELECT ARRAY_AGG(tenant_id) INTO tenant_ids
+    FROM tenant_users
+    WHERE user_id = auth.uid();
+    
+    RETURN COALESCE(tenant_ids, ARRAY[]::UUID[]);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Success message
-DO $$ 
-BEGIN
-    RAISE NOTICE 'RLS policies fixed - infinite recursion resolved!';
-END $$;
+-- Drop and recreate all policies using the helper functions
+DROP POLICY IF EXISTS "Users can view their tenants" ON tenants;
+DROP POLICY IF EXISTS "Super admins can view all tenants" ON tenants;
+DROP POLICY IF EXISTS "Users can view their tenant_users" ON tenant_users;
+DROP POLICY IF EXISTS "Super admins can view all subscriptions" ON subscriptions;
+DROP POLICY IF EXISTS "Tenant admins can view their subscriptions" ON subscriptions;
+DROP POLICY IF EXISTS "Super admins can view all super admins" ON super_admins;
+
+-- Policy: Users can only see tenants they belong to
+-- Uses is_super_admin() and get_user_tenant_ids() functions to avoid infinite recursion
+CREATE POLICY "Users can view their tenants" ON tenants
+    FOR SELECT
+    USING (
+        id = ANY(get_user_tenant_ids())
+        OR is_super_admin()
+    );
+
+-- Policy: Super admins and RS Car Accessories admins can view all tenants
+CREATE POLICY "Super admins can view all tenants" ON tenants
+    FOR SELECT
+    USING (is_super_admin());
+
+-- Policy: Users can view their tenant_users relationships
+CREATE POLICY "Users can view their tenant_users" ON tenant_users
+    FOR SELECT
+    USING (
+        user_id = auth.uid()
+        OR tenant_id = ANY(get_user_tenant_ids())
+        OR is_super_admin()
+    );
+
+-- Policy: Super admins and RS Car Accessories admins can view all subscriptions
+CREATE POLICY "Super admins can view all subscriptions" ON subscriptions
+    FOR SELECT
+    USING (is_super_admin());
+
+-- Policy: Users can view their tenant's subscriptions
+CREATE POLICY "Tenant admins can view their subscriptions" ON subscriptions
+    FOR SELECT
+    USING (tenant_id = ANY(get_user_tenant_ids()));
+
+-- Policy: Super admins can view all super_admins
+CREATE POLICY "Super admins can view all super admins" ON super_admins
+    FOR SELECT
+    USING (is_super_admin());
+
+-- Verify policies are created
+SELECT 
+    schemaname,
+    tablename,
+    policyname,
+    permissive,
+    roles,
+    cmd,
+    qual
+FROM pg_policies
+WHERE tablename IN ('tenants', 'tenant_users', 'subscriptions', 'super_admins')
+ORDER BY tablename, policyname;

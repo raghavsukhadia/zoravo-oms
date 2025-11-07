@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Car, Save, ArrowLeft, Plus, Trash2, Calendar, Clock, User, Phone, Building, MapPin, FileText, Package, DollarSign, AlertCircle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { getCurrentTenantId, isSuperAdmin } from '@/lib/tenant-context'
 
 interface ProductItem {
   product: string
@@ -84,33 +85,80 @@ export default function VehicleInwardPage() {
 
   const loadManagers = async () => {
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .in('role', ['manager', 'admin'])
-        .eq('status', 'active')
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
       
-      if (!error && data) {
-        setManagers(data)
+      if (!isSuper && tenantId) {
+        // Get managers for this tenant via tenant_users table
+        const { data: tenantUsers, error: tenantUsersError } = await supabase
+          .from('tenant_users')
+          .select('user_id')
+          .eq('tenant_id', tenantId)
+          .in('role', ['manager', 'admin'])
+        
+        if (tenantUsersError) throw tenantUsersError
+        
+        if (tenantUsers && tenantUsers.length > 0) {
+          const userIds = tenantUsers.map(tu => tu.user_id)
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .in('id', userIds)
+            .eq('status', 'active')
+            .order('name', { ascending: true })
+          
+          if (error) throw error
+          setManagers(data || [])
+        } else {
+          setManagers([])
+        }
+      } else {
+        // Super admin sees all managers
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .in('role', ['manager', 'admin'])
+          .eq('status', 'active')
+          .order('name', { ascending: true })
+        
+        if (error) throw error
+        setManagers(data || [])
       }
     } catch (error) {
       console.error('Error loading managers:', error)
-      // Fallback mock data
-      setManagers([
-        { id: '1', name: 'Priya Sharma', role: 'manager' },
-        { id: '2', name: 'Rahul Verma', role: 'manager' }
-      ])
+      setManagers([])
     }
   }
 
   const loadLocations = async () => {
     try {
-      const { data, error } = await supabase
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      let query = supabase
         .from('locations')
         .select('*')
         .order('name', { ascending: true })
       
-      if (error) throw error
+      // Add tenant filter for data isolation
+      if (!isSuper && tenantId) {
+        query = query.eq('tenant_id', tenantId)
+      }
+      
+      const { data, error } = await query
+      
+      if (error) {
+        // Check if error is due to missing tenant_id column (PostgreSQL error code 42703 = undefined_column)
+        if (error.code === '42703' && error.message?.includes('tenant_id')) {
+          console.error('❌ ERROR: tenant_id column is missing in locations table.')
+          console.error('📋 SOLUTION: Please run database/multi_tenant_schema.sql in Supabase SQL Editor to add tenant_id column.')
+          alert('Database migration required: Please run database/multi_tenant_schema.sql in Supabase SQL Editor to add tenant_id column to locations table.')
+        } else {
+          throw error
+        }
+        setLocations([])
+        return
+      }
       
       console.log('Loaded locations from database:', data)
       setLocations(data || [])
@@ -123,42 +171,77 @@ export default function VehicleInwardPage() {
 
   const loadVehicleTypes = async () => {
     try {
-      const { data, error } = await supabase
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      let query = supabase
         .from('vehicle_types')
         .select('*')
         .eq('status', 'active')
+        .order('name', { ascending: true })
       
-      if (!error && data) {
-        setVehicleTypes(data)
+      // Add tenant filter for data isolation
+      if (!isSuper && tenantId) {
+        query = query.eq('tenant_id', tenantId)
       }
+      
+      const { data, error } = await query
+      
+      if (error) {
+        // Check if error is due to missing tenant_id column (PostgreSQL error code 42703 = undefined_column)
+        if (error.code === '42703' && error.message?.includes('tenant_id')) {
+          console.error('❌ ERROR: tenant_id column is missing in vehicle_types table.')
+          console.error('📋 SOLUTION: Please run database/multi_tenant_schema.sql in Supabase SQL Editor to add tenant_id column.')
+          alert('Database migration required: Please run database/multi_tenant_schema.sql in Supabase SQL Editor to add tenant_id column to vehicle_types table.')
+        } else {
+          console.error('Error loading vehicle types:', error)
+        }
+        setVehicleTypes([])
+        return
+      }
+      
+      setVehicleTypes(data || [])
     } catch (error) {
       console.error('Error loading vehicle types:', error)
-      // Fallback mock data
-      setVehicleTypes([
-        { id: 'retail', name: 'Retail' },
-        { id: 'showroom', name: 'Showroom' }
-      ])
+      setVehicleTypes([])
     }
   }
 
   const loadDepartments = async () => {
     try {
-      const { data, error } = await supabase
+      const tenantId = getCurrentTenantId()
+      const isSuper = isSuperAdmin()
+      
+      let query = supabase
         .from('departments')
         .select('*')
         .eq('status', 'active')
+        .order('name', { ascending: true })
       
-      if (!error && data) {
-        setDepartments(data)
+      // Add tenant filter for data isolation
+      if (!isSuper && tenantId) {
+        query = query.eq('tenant_id', tenantId)
       }
+      
+      const { data, error } = await query
+      
+      if (error) {
+        // Check if error is due to missing tenant_id column (PostgreSQL error code 42703 = undefined_column)
+        if (error.code === '42703' && error.message?.includes('tenant_id')) {
+          console.error('❌ ERROR: tenant_id column is missing in departments table.')
+          console.error('📋 SOLUTION: Please run database/multi_tenant_schema.sql in Supabase SQL Editor to add tenant_id column.')
+          alert('Database migration required: Please run database/multi_tenant_schema.sql in Supabase SQL Editor to add tenant_id column to departments table.')
+        } else {
+          console.error('Error loading departments:', error)
+        }
+        setDepartments([])
+        return
+      }
+      
+      setDepartments(data || [])
     } catch (error) {
       console.error('Error loading departments:', error)
-      // Fallback mock data
-      setDepartments([
-        { id: 'dept1', name: 'Engine' },
-        { id: 'dept2', name: 'Electrical' },
-        { id: 'dept3', name: 'Body & Paint' }
-      ])
+      setDepartments([])
     }
   }
 
@@ -204,6 +287,8 @@ export default function VehicleInwardPage() {
         ? JSON.stringify(products.filter(p => p.product.trim()))
         : null
 
+      const tenantId = getCurrentTenantId()
+      
       const payload = {
         customer_name: formData.ownerName,
         customer_phone: formData.mobileNumber,
@@ -222,7 +307,8 @@ export default function VehicleInwardPage() {
         notes: formData.remark || null,
         accessories_requested: accessoriesText,
         status: 'pending',
-        priority: formData.priority || 'medium'
+        priority: formData.priority || 'medium',
+        tenant_id: tenantId // Add tenant_id for data isolation
         // Note: inward_datetime removed - created_at is automatically set by the database
       }
 

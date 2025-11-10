@@ -135,9 +135,11 @@ export default function SubscriptionGuard({ children }: SubscriptionGuardProps) 
   // But allow:
   // 1. Admins to access even when tenant is inactive (to submit payment proof)
   // 2. All users to access Settings and About pages
+  // 3. If subscriptionStatus is null, don't block (still loading or no tenant)
   const shouldBlock = 
-    !subscriptionStatus?.isActive && 
-    !subscriptionStatus?.isAdmin && 
+    subscriptionStatus !== null &&
+    !subscriptionStatus.isActive && 
+    !subscriptionStatus.isAdmin && 
     !isAllowedPage
 
   if (shouldBlock) {
@@ -206,7 +208,7 @@ export default function SubscriptionGuard({ children }: SubscriptionGuardProps) 
                 : 'Your subscription has expired. Please submit payment proof in Settings to continue using the service.'
               }
             </p>
-            {subscriptionStatus.daysRemaining !== null && subscriptionStatus.daysRemaining < 0 && (
+            {subscriptionStatus && subscriptionStatus.daysRemaining !== null && subscriptionStatus.daysRemaining < 0 && (
               <p style={{
                 fontSize: '0.875rem',
                 color: '#dc2626',

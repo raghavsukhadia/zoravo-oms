@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 import { 
   Car, 
   Wrench, 
@@ -18,7 +19,9 @@ import {
   X,
   AlertCircle,
   Briefcase,
-  User
+  User,
+  HelpCircle,
+  Mail
 } from 'lucide-react'
 import Logo from '@/components/Logo'
 
@@ -69,6 +72,27 @@ export default function LandingPage() {
 
   return (
     <div style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
+      <style jsx global>{`
+        @keyframes float {
+          0%, 100% { transform: translate(0, 0) rotate(0deg); }
+          33% { transform: translate(30px, -30px) rotate(120deg); }
+          66% { transform: translate(-20px, 20px) rotate(240deg); }
+        }
+        @keyframes fadeInUp {
+          from {
+            opacity: 0;
+            transform: translateY(30px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        @keyframes gradientShift {
+          0%, 100% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+        }
+      `}</style>
       {/* Navigation */}
       <nav style={{
         position: 'fixed',
@@ -76,13 +100,13 @@ export default function LandingPage() {
         left: 0,
         right: 0,
         zIndex: 50,
-        backgroundColor: 'rgba(255,255,255,0.95)',
-        backdropFilter: 'blur(10px)',
-        borderBottom: '1px solid rgba(0,0,0,0.1)',
-        padding: '1rem 0'
+        backgroundColor: '#ffffff',
+        borderBottom: '1px solid #e5e7eb',
+        padding: '1rem 0',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
       }}>
         <div style={{
-          maxWidth: '1200px',
+          maxWidth: '1400px',
           margin: '0 auto',
           padding: '0 2rem',
           display: 'flex',
@@ -93,32 +117,30 @@ export default function LandingPage() {
             <Logo size="medium" showText={true} variant="dark" />
           </div>
           
-          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
             <button
               onClick={() => router.push('/login')}
               style={{
-                padding: '0.75rem 1.75rem',
+                padding: '0.625rem 1.5rem',
                 backgroundColor: 'transparent',
                 color: '#2563eb',
-                border: '2px solid #2563eb',
-                borderRadius: '0.75rem',
+                border: '1.5px solid #2563eb',
+                borderRadius: '0.5rem',
                 fontWeight: '600',
-                fontSize: '0.95rem',
+                fontSize: '0.875rem',
                 cursor: 'pointer',
-                transition: 'all 0.3s ease',
+                transition: 'all 0.2s ease',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.5rem'
               }}
               onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
                 e.currentTarget.style.backgroundColor = '#eff6ff'
-                e.currentTarget.style.transform = 'translateY(-2px)'
-                e.currentTarget.style.boxShadow = '0 4px 12px rgba(37, 99, 235, 0.2)'
+                e.currentTarget.style.borderColor = '#1d4ed8'
               }}
               onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
                 e.currentTarget.style.backgroundColor = 'transparent'
-                e.currentTarget.style.transform = 'translateY(0)'
-                e.currentTarget.style.boxShadow = 'none'
+                e.currentTarget.style.borderColor = '#2563eb'
               }}
             >
               Sign In
@@ -126,31 +148,62 @@ export default function LandingPage() {
             <button
               onClick={() => setShowCreateAccount(true)}
               style={{
-                padding: '0.75rem 1.75rem',
-                background: 'linear-gradient(135deg, #2563eb 0%, #4f46e5 100%)',
+                padding: '0.625rem 1.5rem',
+                backgroundColor: '#2563eb',
                 color: 'white',
                 border: 'none',
-                borderRadius: '0.75rem',
+                borderRadius: '0.5rem',
                 fontWeight: '600',
-                fontSize: '0.95rem',
+                fontSize: '0.875rem',
                 cursor: 'pointer',
-                transition: 'all 0.3s ease',
+                transition: 'all 0.2s ease',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.5rem',
-                boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)'
+                boxShadow: '0 1px 2px rgba(37, 99, 235, 0.2)'
               }}
               onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
-                e.currentTarget.style.transform = 'translateY(-2px)'
-                e.currentTarget.style.boxShadow = '0 6px 20px rgba(37, 99, 235, 0.4)'
+                e.currentTarget.style.backgroundColor = '#1d4ed8'
+                e.currentTarget.style.boxShadow = '0 2px 4px rgba(37, 99, 235, 0.3)'
               }}
               onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
-                e.currentTarget.style.transform = 'translateY(0)'
-                e.currentTarget.style.boxShadow = '0 4px 12px rgba(37, 99, 235, 0.3)'
+                e.currentTarget.style.backgroundColor = '#2563eb'
+                e.currentTarget.style.boxShadow = '0 1px 2px rgba(37, 99, 235, 0.2)'
               }}
             >
-              Start Business
+              Create Account
             </button>
+            <a
+              href="mailto:piyush@sunkool.in"
+              style={{
+                padding: '0.625rem 1.5rem',
+                backgroundColor: '#f8fafc',
+                color: '#64748b',
+                border: '1px solid #e2e8f0',
+                borderRadius: '0.5rem',
+                fontWeight: '600',
+                fontSize: '0.875rem',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                textDecoration: 'none'
+              }}
+              onMouseEnter={(e: React.MouseEvent<HTMLAnchorElement>) => {
+                e.currentTarget.style.backgroundColor = '#f1f5f9'
+                e.currentTarget.style.borderColor = '#cbd5e1'
+                e.currentTarget.style.color = '#475569'
+              }}
+              onMouseLeave={(e: React.MouseEvent<HTMLAnchorElement>) => {
+                e.currentTarget.style.backgroundColor = '#f8fafc'
+                e.currentTarget.style.borderColor = '#e2e8f0'
+                e.currentTarget.style.color = '#64748b'
+              }}
+            >
+              <HelpCircle style={{ width: '1rem', height: '1rem' }} />
+              Support
+            </a>
           </div>
         </div>
       </nav>
@@ -158,11 +211,23 @@ export default function LandingPage() {
       {/* Hero Section */}
       <section style={{
         minHeight: '100vh',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        backgroundColor: '#f8fafc',
         display: 'flex',
         alignItems: 'center',
-        paddingTop: '5rem'
+        paddingTop: '5rem',
+        position: 'relative',
+        overflow: 'hidden'
       }}>
+        {/* Subtle Background Pattern */}
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.03) 0%, rgba(15, 23, 42, 0.02) 100%)',
+          zIndex: 0
+        }}></div>
         <div style={{
           maxWidth: '1200px',
           margin: '0 auto',
@@ -170,82 +235,147 @@ export default function LandingPage() {
           display: 'grid',
           gridTemplateColumns: '1fr 1fr',
           gap: '4rem',
-          alignItems: 'center'
+          alignItems: 'center',
+          position: 'relative',
+          zIndex: 1
         }}>
           {/* Left Content */}
-          <div>
+          <div style={{ animation: 'fadeInUp 0.8s ease-out' }}>
+            <div style={{
+              display: 'inline-block',
+              padding: '0.5rem 1rem',
+              background: '#eff6ff',
+              borderRadius: '0.5rem',
+              marginBottom: '1.5rem',
+              fontSize: '0.875rem',
+              color: '#2563eb',
+              fontWeight: '600',
+              border: '1px solid #dbeafe'
+            }}>
+              🚀 Trusted by 200+ Car Accessories Businesses
+            </div>
             <h1 style={{
               fontSize: '3.5rem',
-              fontWeight: 'bold',
-              color: 'white',
+              fontWeight: '800',
+              color: '#0f172a',
               margin: '0 0 1.5rem 0',
-              lineHeight: '1.1'
+              lineHeight: '1.1',
+              letterSpacing: '-0.02em'
             }}>
-              Operations Management System for
+              Transform Your Business with
               <br />
-              <span style={{ background: 'linear-gradient(135deg, #22d3ee 0%, #14b8a6 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
-                Car Accessories Businesses
+              <span style={{ 
+                color: '#2563eb'
+              }}>
+                Smart Operations Management
               </span>
             </h1>
             <p style={{
               fontSize: '1.25rem',
-              color: 'rgba(255,255,255,0.9)',
+              color: '#64748b',
               margin: '0 0 2rem 0',
-              lineHeight: '1.6'
+              lineHeight: '1.7',
+              fontWeight: '400'
             }}>
-              Zoravo OMS digitizes your entire workflow—vehicle inward, installation tracking, invoicing, and service follow‑ups—so you can run operations with speed and clarity.
+              Zoravo OMS digitizes your entire workflow—from vehicle intake to delivery, installation tracking, invoicing, and service follow-ups. Run your operations with <strong style={{ color: '#1e293b' }}>speed, clarity, and complete control</strong>.
             </p>
+            
+            {/* Key Benefits */}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+              marginBottom: '2rem'
+            }}>
+              {[
+                { icon: '✓', text: 'Complete vehicle lifecycle management' },
+                { icon: '✓', text: 'Real-time installation tracking' },
+                { icon: '✓', text: 'Automated invoicing & payments' },
+                { icon: '✓', text: 'Multi-tenant support for franchises' }
+              ].map((benefit, idx) => (
+                <div key={idx} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  color: '#475569',
+                  fontSize: '1rem'
+                }}>
+                  <span style={{
+                    width: '1.5rem',
+                    height: '1.5rem',
+                    borderRadius: '50%',
+                    background: '#dcfce7',
+                    color: '#059669',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '0.875rem',
+                    fontWeight: 'bold'
+                  }}>{benefit.icon}</span>
+                  <span>{benefit.text}</span>
+                </div>
+              ))}
+            </div>
             
             <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', flexWrap: 'wrap' }}>
               <button
                 onClick={() => setShowCreateAccount(true)}
                 style={{
-                  padding: '1.125rem 2.5rem',
-                  background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
-                  color: '#2563eb',
+                  padding: '1rem 2rem',
+                  backgroundColor: '#2563eb',
+                  color: 'white',
                   border: 'none',
-                  borderRadius: '0.75rem',
-                  fontWeight: '700',
-                  fontSize: '1.125rem',
+                  borderRadius: '0.5rem',
+                  fontWeight: '600',
+                  fontSize: '1rem',
                   cursor: 'pointer',
-                  transition: 'all 0.3s ease',
+                  transition: 'all 0.2s ease',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '0.75rem',
-                  boxShadow: '0 10px 30px rgba(0,0,0,0.2)'
+                  boxShadow: '0 2px 4px rgba(37, 99, 235, 0.2)'
                 }}
                 onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
-                  e.currentTarget.style.transform = 'translateY(-3px)'
-                  e.currentTarget.style.boxShadow = '0 15px 40px rgba(0,0,0,0.3)'
+                  e.currentTarget.style.backgroundColor = '#1d4ed8'
+                  e.currentTarget.style.boxShadow = '0 4px 8px rgba(37, 99, 235, 0.3)'
+                  e.currentTarget.style.transform = 'translateY(-1px)'
                 }}
                 onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
+                  e.currentTarget.style.backgroundColor = '#2563eb'
+                  e.currentTarget.style.boxShadow = '0 2px 4px rgba(37, 99, 235, 0.2)'
                   e.currentTarget.style.transform = 'translateY(0)'
-                  e.currentTarget.style.boxShadow = '0 10px 30px rgba(0,0,0,0.2)'
                 }}
               >
                 Start Your Business
-                <ArrowRight style={{ width: '1.5rem', height: '1.5rem' }} />
+                <ArrowRight style={{ width: '1.25rem', height: '1.25rem' }} />
               </button>
               
               <button
                 onClick={() => router.push('/login')}
                 style={{
-                  padding: '1.125rem 2.5rem',
-                  backgroundColor: 'transparent',
-                  color: 'white',
-                  border: '2px solid white',
-                  borderRadius: '0.75rem',
+                  padding: '1rem 2rem',
+                  backgroundColor: 'white',
+                  color: '#2563eb',
+                  border: '1.5px solid #2563eb',
+                  borderRadius: '0.5rem',
                   fontWeight: '600',
-                  fontSize: '1.125rem',
+                  fontSize: '1rem',
                   cursor: 'pointer',
-                  transition: 'all 0.3s ease'
+                  transition: 'all 0.2s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem'
                 }}
                 onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
-                  e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.15)'
-                  e.currentTarget.style.transform = 'translateY(-2px)'
+                  e.currentTarget.style.backgroundColor = '#eff6ff'
+                  e.currentTarget.style.borderColor = '#1d4ed8'
+                  e.currentTarget.style.color = '#1d4ed8'
+                  e.currentTarget.style.transform = 'translateY(-1px)'
                 }}
                 onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
-                  e.currentTarget.style.backgroundColor = 'transparent'
+                  e.currentTarget.style.backgroundColor = 'white'
+                  e.currentTarget.style.borderColor = '#2563eb'
+                  e.currentTarget.style.color = '#2563eb'
                   e.currentTarget.style.transform = 'translateY(0)'
                 }}
               >
@@ -258,17 +388,16 @@ export default function LandingPage() {
           {/* Right Content - Dashboard Preview */}
           <div style={{
             position: 'relative',
-            backgroundColor: 'rgba(255,255,255,0.1)',
-            borderRadius: '1rem',
+            backgroundColor: 'white',
+            borderRadius: '0.75rem',
             padding: '2rem',
-            backdropFilter: 'blur(10px)',
-            border: '1px solid rgba(255,255,255,0.2)'
+            border: '1px solid #e5e7eb',
+            boxShadow: '0 4px 6px rgba(0,0,0,0.05)'
           }}>
             <div style={{
-              backgroundColor: 'white',
+              backgroundColor: 'transparent',
               borderRadius: '0.5rem',
-              padding: '1.5rem',
-              boxShadow: '0 25px 50px rgba(0,0,0,0.15)'
+              padding: '0'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
                 <div style={{
@@ -328,7 +457,7 @@ export default function LandingPage() {
       </section>
 
       {/* Modules Section */}
-      <section style={{ padding: '4rem 2rem', backgroundColor: 'white' }}>
+      <section style={{ padding: '4rem 2rem', backgroundColor: '#ffffff' }}>
         <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
           <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
             <h2 style={{ fontSize: '2rem', fontWeight: 800, color: '#0f172a', margin: 0 }}>Purpose‑Built Modules</h2>
@@ -348,7 +477,7 @@ export default function LandingPage() {
       {/* Stats Section */}
       <section style={{
         padding: '4rem 2rem',
-        backgroundColor: '#f9fafb'
+        backgroundColor: '#f8fafc'
       }}>
         <div style={{
           maxWidth: '1200px',
@@ -392,7 +521,7 @@ export default function LandingPage() {
       {/* Features Section */}
       <section id="features" style={{
         padding: '6rem 2rem',
-        backgroundColor: 'white'
+        backgroundColor: '#ffffff'
       }}>
         <div style={{
           maxWidth: '1200px',
@@ -480,7 +609,7 @@ export default function LandingPage() {
       {/* CTA Section */}
       <section style={{
         padding: '6rem 2rem',
-        background: 'linear-gradient(135deg, #1f2937 0%, #374151 100%)',
+        backgroundColor: '#0f172a',
         color: 'white'
       }}>
         <div style={{

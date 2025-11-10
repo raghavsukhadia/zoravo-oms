@@ -25,6 +25,10 @@ const nextConfig = {
       },
     ],
   },
+  // Disable static optimization for dashboard routes to prevent prerendering errors
+  experimental: {
+    missingSuspenseWithCSRBailout: false,
+  },
 }
 
 module.exports = nextConfig

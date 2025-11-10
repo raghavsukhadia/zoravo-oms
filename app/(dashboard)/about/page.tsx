@@ -3,6 +3,10 @@
 import Logo from '@/components/Logo'
 import { CheckCircle, TrendingUp, Shield, Zap, Users, BarChart3, Clock, HeadphonesIcon } from 'lucide-react'
 
+// Disable static generation - must be exported before component
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export default function AboutPage() {
   return (
     <div style={{ padding: '2rem', backgroundColor: '#f8fafc', minHeight: '100vh' }}>

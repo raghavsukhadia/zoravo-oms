@@ -6,6 +6,10 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { getCurrentTenantId, isSuperAdmin } from '@/lib/tenant-context'
 
+// Disable static generation - must be exported before component
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export default function ServiceTrackerPage() {
   const [services, setServices] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState('')

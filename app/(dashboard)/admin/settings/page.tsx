@@ -26,6 +26,10 @@ interface PlatformSettings {
   subscriptionPlans: SubscriptionPlan[]
 }
 
+// Disable static generation - must be exported before component
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export default function PlatformSettingsPage() {
   const supabase = createClient()
   const [settings, setSettings] = useState<PlatformSettings>({

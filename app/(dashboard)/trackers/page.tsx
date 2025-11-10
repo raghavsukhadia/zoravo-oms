@@ -4,6 +4,10 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Activity, Clock, CheckCircle, XCircle, Phone, FileText } from 'lucide-react'
 
+// Disable static generation - must be exported before component
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export default function TrackersPage() {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState('followups')

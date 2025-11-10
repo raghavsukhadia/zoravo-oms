@@ -5,6 +5,10 @@ import { useParams, useRouter } from 'next/navigation'
 import { ArrowLeft, Car, User, Phone, Mail, MapPin, Calendar, Wrench, DollarSign, FileText, Edit, Trash2, Plus } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
+// Disable static generation - must be exported before component
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export default function VehicleDetailsPage() {
   const params = useParams()
   const router = useRouter()

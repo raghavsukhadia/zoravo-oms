@@ -11,6 +11,10 @@ import { createClient } from '@/lib/supabase/client'
 import { notificationWorkflow } from '@/lib/notification-workflow'
 import { getCurrentTenantId, isSuperAdmin } from '@/lib/tenant-context'
 
+// Disable static generation - must be exported before component
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState('overview')
   const [loading, setLoading] = useState(true)

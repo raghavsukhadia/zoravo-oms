@@ -10,6 +10,10 @@ import { notificationWorkflow } from '@/lib/notification-workflow'
 import { checkUserRole, type UserRole } from '@/lib/rbac'
 import { getCurrentTenantId, isSuperAdmin } from '@/lib/tenant-context'
 
+// Disable static generation - must be exported before component
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export default function VehiclesPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [activeTab, setActiveTab] = useState('all')

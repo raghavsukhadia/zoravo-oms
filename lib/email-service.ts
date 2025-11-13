@@ -1,7 +1,18 @@
 import { Resend } from 'resend'
 
-// Initialize Resend client
-const resend = new Resend(process.env.RESEND_API_KEY)
+// Lazy initialization of Resend client to avoid build-time errors
+let resend: Resend | null = null
+
+function getResendClient(): Resend {
+  if (!resend) {
+    const apiKey = process.env.RESEND_API_KEY
+    if (!apiKey) {
+      throw new Error('RESEND_API_KEY is not configured')
+    }
+    resend = new Resend(apiKey)
+  }
+  return resend
+}
 
 export interface DailyReportEmailData {
   managerName: string
@@ -26,10 +37,7 @@ interface WelcomeEmailData {
 
 export async function sendWelcomeEmail(data: WelcomeEmailData) {
   try {
-    if (!process.env.RESEND_API_KEY) {
-      throw new Error('RESEND_API_KEY is not configured')
-    }
-
+    const resendClient = getResendClient()
     const fromEmail = process.env.RESEND_FROM_EMAIL || 'social@sunkool.in'
     
     // Ensure supportEmail is set in data
@@ -40,7 +48,7 @@ export async function sendWelcomeEmail(data: WelcomeEmailData) {
 
     const emailHtml = generateWelcomeEmailHTML(emailData)
 
-    const result = await resend.emails.send({
+    const result = await resendClient.emails.send({
       from: fromEmail,
       to: data.adminEmail,
       subject: `Welcome to ZORAVO OMS - Activate Your Account`,
@@ -340,15 +348,12 @@ function generateWelcomeEmailHTML(data: WelcomeEmailData): string {
  */
 export async function sendDailyReportEmail(data: DailyReportEmailData) {
   try {
-    if (!process.env.RESEND_API_KEY) {
-      throw new Error('RESEND_API_KEY is not configured')
-    }
-
+    const resendClient = getResendClient()
     const fromEmail = process.env.RESEND_FROM_EMAIL || 'social@sunkool.in'
     
     const emailHtml = generateDailyReportEmailHTML(data)
 
-    const result = await resend.emails.send({
+    const result = await resendClient.emails.send({
       from: fromEmail,
       to: data.managerEmail,
       subject: `Daily Vehicle Report - ${data.reportDate} | ZORAVO OMS`,
